@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, send_file
 from sqlalchemy import func
 from extensions import db
 from models import Submission, Participant, ReviewLog, Challenge
+from utils.dates import get_today_local
 
 bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
@@ -121,7 +122,7 @@ def analytics():
     # Submission trend (last 14 days)
     trend = []
     for i in range(13, -1, -1):
-        day = date.today() - timedelta(days=i)
+        day = get_today_local() - timedelta(days=i)
         count = Submission.query.filter(Submission.submission_date == day).count()
         trend.append({"date": day.isoformat(), "count": count})
 

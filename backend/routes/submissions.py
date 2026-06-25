@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import Participant, Submission, Challenge
 from utils.uploads import save_upload
+from utils.dates import get_today_local
 
 bp = Blueprint("submissions", __name__, url_prefix="/api")
 
@@ -43,7 +44,7 @@ def create_submission():
         else:
             participant.name = name  # keep name in sync
 
-        today = date.today()
+        today = get_today_local()
 
         # Duplicate check
         existing = Submission.query.filter_by(

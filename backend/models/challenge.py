@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, date
+from utils.dates import get_today_local
 from extensions import db
 class Challenge(db.Model):
     __tablename__ = "challenge"
@@ -18,7 +19,7 @@ class Challenge(db.Model):
     submissions = db.relationship("Submission", back_populates="challenge", lazy="dynamic")
 
     def auto_update_status(self):
-        today = date.today()
+        today = get_today_local()
         if today < self.start_date:
             self.status = "Upcoming"
         elif self.start_date <= today <= self.end_date:

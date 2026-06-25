@@ -1,7 +1,7 @@
 from datetime import date
 from flask import Blueprint, request, jsonify
 from extensions import db
-from models import Challenge
+from models import Challenge, Submission
 
 bp = Blueprint("challenges", __name__, url_prefix="/api/challenges")
 
@@ -40,6 +40,17 @@ def create_challenge():
     c.auto_update_status()
     db.session.add(c)
     db.session.commit()
+
+    # Retroactively link matching unlinked submissions to this new challenge
+    unlinked = Submission.query.filter(
+        Submission.challenge_id == None,
+        Submission.submission_date >= start,
+        Submission.submission_date <= end
+    ).all()
+    for s in unlinked:
+        s.challenge_id = c.id
+    db.session.commit()
+
     return jsonify(c.to_dict()), 201
 
 
@@ -58,6 +69,17 @@ def update_challenge(cid):
     else:
         c.auto_update_status()
     db.session.commit()
+
+    # Retroactively link matching unlinked submissions to this updated challenge
+    unlinked = Submission.query.filter(
+        Submission.challenge_id == None,
+        Submission.submission_date >= c.start_date,
+        Submission.submission_date <= c.end_date
+    ).all()
+    for s in unlinked:
+        s.challenge_id = c.id
+    db.session.commit()
+
     return jsonify(c.to_dict())
 
 

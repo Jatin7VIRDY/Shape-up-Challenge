@@ -17,6 +17,7 @@
 #     total_points = db.Column(db.Integer, default=0)
 from datetime import datetime, timezone, date
 from extensions import db
+from utils.dates import get_today_local
 
 
 class Submission(db.Model):
@@ -29,7 +30,7 @@ class Submission(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     participant_id = db.Column(db.Integer, db.ForeignKey("participant.id"), nullable=False)
     challenge_id = db.Column(db.Integer, db.ForeignKey("challenge.id"), nullable=True)
-    submission_date = db.Column(db.Date, nullable=False, default=date.today)
+    submission_date = db.Column(db.Date, nullable=False, default=get_today_local)
 
     # Steps
     steps = db.Column(db.Integer, nullable=False)
