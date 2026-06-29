@@ -146,13 +146,39 @@ const uploadFileInChunks = async (file, folder, fieldLabel, onProgress) => {
   const { data: sigData } = await API.post("/api/cloudinary-signature", { folder })
   const { signature, timestamp, api_key, cloud_name } = sigData
 
-  const chunkSize = 5 * 1024 * 1024 // 5MB chunks
   const totalSize = file.size
+  const resourceType = file.type.startsWith("video/") ? "video" : "image"
+
+  // For small files (under 5MB), perform a standard direct upload with native progress monitoring
+  if (totalSize <= 5 * 1024 * 1024) {
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("api_key", api_key)
+    formData.append("timestamp", timestamp)
+    formData.append("signature", signature)
+    formData.append("folder", folder)
+    formData.append("resource_type", resourceType)
+
+    const response = await axios.post(
+      `https://api.cloudinary.com/v1_1/${cloud_name}/${resourceType}/upload`,
+      formData,
+      {
+        onUploadProgress: (progressEvent) => {
+          if (onProgress) {
+            onProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total))
+          }
+        }
+      }
+    )
+    return response.data.secure_url
+  }
+
+  // For large files (over 5MB), perform chunked uploads
+  const chunkSize = 5 * 1024 * 1024 // 5MB chunks
   const uniqueId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
   
   let start = 0
   let secureUrl = ""
-  const resourceType = file.type.startsWith("video/") ? "video" : "image"
 
   while (start < totalSize) {
     const end = Math.min(start + chunkSize, totalSize)
@@ -164,6 +190,7 @@ const uploadFileInChunks = async (file, folder, fieldLabel, onProgress) => {
     formData.append("timestamp", timestamp)
     formData.append("signature", signature)
     formData.append("folder", folder)
+    formData.append("resource_type", resourceType)
 
     const headers = {
       "Content-Range": `bytes ${start}-${end - 1}/${totalSize}`,
