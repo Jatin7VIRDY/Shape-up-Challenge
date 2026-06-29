@@ -109,6 +109,7 @@ const submitForm = async () => {
 </template> -->
 <script setup>
 import { ref, onMounted } from "vue"
+import axios from "axios"
 import API from "../services/api"
 import Swal from "sweetalert2"
 const employee_id = ref("")
@@ -116,6 +117,7 @@ const name = ref("")
 const steps = ref("")
 const activeChallenge = ref(null)
 const loading = ref(false)
+const uploadStatus = ref("")
 const toast = ref(null)   // { type: "success"|"error", msg }
 
 const stepsProof = ref(null)
@@ -140,44 +142,145 @@ onMounted(async () => {
   } catch {}
 })
 
+const uploadFileInChunks = async (file, folder, fieldLabel, onProgress) => {
+  const { data: sigData } = await API.post("/api/cloudinary-signature", { folder })
+  const { signature, timestamp, api_key, cloud_name } = sigData
+
+  const chunkSize = 5 * 1024 * 1024 // 5MB chunks
+  const totalSize = file.size
+  const uniqueId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+  
+  let start = 0
+  let secureUrl = ""
+  const resourceType = file.type.startsWith("video/") ? "video" : "image"
+
+  while (start < totalSize) {
+    const end = Math.min(start + chunkSize, totalSize)
+    const chunk = file.slice(start, end)
+
+    const formData = new FormData()
+    formData.append("file", chunk)
+    formData.append("api_key", api_key)
+    formData.append("timestamp", timestamp)
+    formData.append("signature", signature)
+    formData.append("folder", folder)
+
+    const headers = {
+      "Content-Range": `bytes ${start}-${end - 1}/${totalSize}`,
+      "X-Unique-Upload-Id": uniqueId,
+    }
+
+    const response = await axios.post(
+      `https://api.cloudinary.com/v1_1/${cloud_name}/${resourceType}/upload`,
+      formData,
+      { headers }
+    )
+
+    secureUrl = response.data.secure_url
+    
+    if (onProgress) {
+      onProgress(Math.round((end / totalSize) * 100))
+    }
+
+    start = end
+  }
+
+  return secureUrl
+}
+
 const submitForm = async () => {
   if (loading.value) return
   const s = Number(steps.value)
-  if (s > 15000) { await Swal.fire({
-  icon: "error",
-  title: "Invalid Steps",
-  text: "Maximum 15000 steps allowed"
-}); return }
+  if (s > 15000) {
+    await Swal.fire({
+      icon: "error",
+      title: "Invalid Steps",
+      text: "Maximum 15000 steps allowed"
+    })
+    return
+  }
 
   loading.value = true
+  uploadStatus.value = "Starting upload..."
   try {
+    let stepsProofUrl = ""
+    let fitnessVideoUrl = ""
+    let foodPhotoUrl = ""
+    let attendanceUrl = ""
+
+    if (stepsProof.value) {
+      uploadStatus.value = "Uploading Steps Screenshot: 0%"
+      stepsProofUrl = await uploadFileInChunks(
+        stepsProof.value,
+        "shapeup/steps",
+        "Steps Screenshot",
+        (p) => { uploadStatus.value = `Uploading Steps Screenshot: ${p}%` }
+      )
+    }
+
+    if (fitnessVideo.value) {
+      uploadStatus.value = "Uploading Fitness Video: 0%"
+      fitnessVideoUrl = await uploadFileInChunks(
+        fitnessVideo.value,
+        "shapeup/fitness",
+        "Fitness Video",
+        (p) => { uploadStatus.value = `Uploading Fitness Video: ${p}%` }
+      )
+    }
+
+    if (foodPhoto.value) {
+      uploadStatus.value = "Uploading Food Photo: 0%"
+      foodPhotoUrl = await uploadFileInChunks(
+        foodPhoto.value,
+        "shapeup/food",
+        "Food Photo",
+        (p) => { uploadStatus.value = `Uploading Food Photo: ${p}%` }
+      )
+    }
+
+    if (fitnessAttendanceProof.value) {
+      uploadStatus.value = "Uploading Attendance Proof: 0%"
+      attendanceUrl = await uploadFileInChunks(
+        fitnessAttendanceProof.value,
+        "shapeup/attendance",
+        "Attendance Proof",
+        (p) => { uploadStatus.value = `Uploading Attendance Proof: ${p}%` }
+      )
+    }
+
+    uploadStatus.value = "Submitting details..."
+
     const formData = new FormData()
     formData.append("employee_id", employee_id.value)
     formData.append("name", name.value)
     formData.append("steps", steps.value)
     if (activeChallenge.value) formData.append("challenge_id", activeChallenge.value.id)
-    if (stepsProof.value) formData.append("steps_proof", stepsProof.value)
-    if (fitnessVideo.value) formData.append("fitness_video", fitnessVideo.value)
-    if (foodPhoto.value) formData.append("food_photo", foodPhoto.value)
-    if (fitnessAttendanceProof.value) formData.append("fitness_attendance_proof", fitnessAttendanceProof.value)
+    
+    if (stepsProofUrl) formData.append("steps_proof", stepsProofUrl)
+    if (fitnessVideoUrl) formData.append("fitness_video", fitnessVideoUrl)
+    if (foodPhotoUrl) formData.append("food_photo", foodPhotoUrl)
+    if (attendanceUrl) formData.append("fitness_attendance_proof", attendanceUrl)
 
-    await API.post("/api/submission", formData, { headers: { "Content-Type": "multipart/form-data" } })
+    await API.post("/api/submission", formData)
+    
     await Swal.fire({
-  icon: "success",
-  title: "Submission Successful",
-  text: "Your activity has been submitted."
-})
+      icon: "success",
+      title: "Submission Successful",
+      text: "Your activity has been submitted."
+    })
+    
     employee_id.value = ""; name.value = ""; steps.value = ""
     stepsProof.value = null; fitnessVideo.value = null
     fitnessAttendanceProof.value = null; foodPhoto.value = null
   } catch (error) {
     await Swal.fire({
-  icon: "error",
-  title: "Submission Failed",
-  text: error?.response?.data?.message || "Something went wrong"
-})
+      icon: "error",
+      title: "Submission Failed",
+      text: error.message || "Something went wrong"
+    })
   } finally {
     loading.value = false
+    uploadStatus.value = ""
   }
 }
 </script>
@@ -264,7 +367,10 @@ const submitForm = async () => {
         </div>
 
         <button type="submit" class="submit-btn" :disabled="loading">
-          <span v-if="loading" class="spinner">⏳</span>
+          <span v-if="loading" class="loading-container">
+            <span class="spinner">⏳</span>
+            <span class="loading-text">{{ uploadStatus || 'Submitting...' }}</span>
+          </span>
           <span v-else>Submit Activity →</span>
         </button>
 
@@ -375,6 +481,8 @@ const submitForm = async () => {
 }
 .submit-btn:hover:not(:disabled) { opacity: 0.91; transform: translateY(-1px); }
 .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.loading-container { display: flex; align-items: center; justify-content: center; gap: 0.6rem; }
+.loading-text { font-size: 0.95rem; font-weight: 600; }
 
 .my-link { text-align: center; font-size: 0.85rem; }
 .my-link a { color: var(--primary); text-decoration: none; }

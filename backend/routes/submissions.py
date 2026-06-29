@@ -1,4 +1,7 @@
 from datetime import date
+import time
+import cloudinary
+import cloudinary.utils
 from flask import Blueprint, request, jsonify
 from sqlalchemy.exc import IntegrityError
 from extensions import db
@@ -7,6 +10,34 @@ from utils.uploads import save_upload
 from utils.dates import get_today_local
 
 bp = Blueprint("submissions", __name__, url_prefix="/api")
+
+
+@bp.route("/cloudinary-signature", methods=["POST"])
+def get_cloudinary_signature():
+    try:
+        data = request.json or {}
+        folder = data.get("folder", "shapeup")
+
+        config = cloudinary.config()
+        if not config.api_secret or not config.api_key:
+            return jsonify({"message": "Cloudinary is not configured on the server"}), 500
+
+        timestamp = int(time.time())
+        params = {
+            "timestamp": timestamp,
+            "folder": folder,
+        }
+
+        signature = cloudinary.utils.api_sign_request(params, config.api_secret)
+
+        return jsonify({
+            "signature": signature,
+            "timestamp": timestamp,
+            "api_key": config.api_key,
+            "cloud_name": config.cloud_name
+        }), 200
+    except Exception as e:
+        return jsonify({"message": f"Failed to generate signature: {str(e)}"}), 500
 
 
 @bp.route("/submission", methods=["POST"])
@@ -55,11 +86,30 @@ def create_submission():
         if existing:
             return jsonify({"message": "You have already submitted for today"}), 409
 
-        # Save uploads
-        steps_proof_path = save_upload(request.files.get("steps_proof"), "steps_proof")
-        fitness_video_path = save_upload(request.files.get("fitness_video"), "fitness_video")
-        food_photo_path = save_upload(request.files.get("food_photo"), "food_photo")
-        attendance_path = save_upload(request.files.get("fitness_attendance_proof"), "fitness_attendance_proof")
+        # Save uploads (either file upload or pre-uploaded URL)
+        steps_proof_path = None
+        if "steps_proof" in request.files:
+            steps_proof_path = save_upload(request.files.get("steps_proof"), "steps_proof")
+        else:
+            steps_proof_path = request.form.get("steps_proof") or None
+
+        fitness_video_path = None
+        if "fitness_video" in request.files:
+            fitness_video_path = save_upload(request.files.get("fitness_video"), "fitness_video")
+        else:
+            fitness_video_path = request.form.get("fitness_video") or None
+
+        food_photo_path = None
+        if "food_photo" in request.files:
+            food_photo_path = save_upload(request.files.get("food_photo"), "food_photo")
+        else:
+            food_photo_path = request.form.get("food_photo") or None
+
+        attendance_path = None
+        if "fitness_attendance_proof" in request.files:
+            attendance_path = save_upload(request.files.get("fitness_attendance_proof"), "fitness_attendance_proof")
+        else:
+            attendance_path = request.form.get("fitness_attendance_proof") or None
 
         submission = Submission(
             participant_id=participant.id,

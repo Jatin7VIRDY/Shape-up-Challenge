@@ -8,10 +8,10 @@ import cloudinary
 import cloudinary.uploader
 
 ALLOWED_EXTENSIONS = {
-    "steps_proof": {"jpg", "jpeg", "png", "webp", "gif"},
+    "steps_proof": {"jpg", "jpeg", "png", "webp", "gif", "heic", "heif"},
     "fitness_video": {"mp4", "mov", "avi", "webm"},
-    "food_photo": {"jpg", "jpeg", "png", "webp", "gif"},
-    "fitness_attendance_proof": {"jpg", "jpeg", "png", "webp", "gif"},
+    "food_photo": {"jpg", "jpeg", "png", "webp", "gif", "heic", "heif"},
+    "fitness_attendance_proof": {"jpg", "jpeg", "png", "webp", "gif", "heic", "heif"},
 }
 
 SUBFOLDER = {

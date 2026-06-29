@@ -8,7 +8,7 @@ load_dotenv(os.path.join(BACKEND_DIR, ".env"))
 BASE_DIR = os.path.abspath(os.path.join(BACKEND_DIR, ".."))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/x-msvideo", "video/webm"}
 MAX_IMAGE_SIZE = 10 * 1024 * 1024   # 10 MB
 MAX_VIDEO_SIZE = 200 * 1024 * 1024  # 200 MB
