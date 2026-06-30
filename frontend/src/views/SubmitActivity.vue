@@ -142,77 +142,31 @@ onMounted(async () => {
   } catch {}
 })
 
-const uploadFileInChunks = async (file, folder, fieldLabel, onProgress) => {
-  const { data: sigData } = await API.post("/api/cloudinary-signature", { folder })
-  const { signature, timestamp, api_key, cloud_name } = sigData
+const uploadFileToR2 = async (file, folder, fieldLabel, onProgress) => {
+  const fileExtension = file.name.split('.').pop()
+  const uniqueName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExtension}`
 
-  const totalSize = file.size
-  const resourceType = file.type.startsWith("video/") ? "video" : "image"
+  // Request presigned URL from backend
+  const { data } = await API.post("/api/r2-presigned-url", {
+    key: uniqueName,
+    contentType: file.type || "application/octet-stream"
+  })
 
-  // For small files (under 5MB), perform a standard direct upload with native progress monitoring
-  if (totalSize <= 5 * 1024 * 1024) {
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("api_key", api_key)
-    formData.append("timestamp", timestamp)
-    formData.append("signature", signature)
-    formData.append("folder", folder)
-    formData.append("resource_type", resourceType)
+  const { uploadUrl, publicUrl } = data
 
-    const response = await axios.post(
-      `https://api.cloudinary.com/v1_1/${cloud_name}/${resourceType}/upload`,
-      formData,
-      {
-        onUploadProgress: (progressEvent) => {
-          if (onProgress) {
-            onProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total))
-          }
-        }
+  // Upload file directly to R2 using PUT
+  await axios.put(uploadUrl, file, {
+    headers: {
+      "Content-Type": file.type || "application/octet-stream"
+    },
+    onUploadProgress: (progressEvent) => {
+      if (onProgress) {
+        onProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total))
       }
-    )
-    return response.data.secure_url
-  }
-
-  // For large files (over 5MB), perform chunked uploads
-  const chunkSize = 5 * 1024 * 1024 // 5MB chunks
-  const uniqueId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
-  
-  let start = 0
-  let secureUrl = ""
-
-  while (start < totalSize) {
-    const end = Math.min(start + chunkSize, totalSize)
-    const chunk = file.slice(start, end)
-
-    const formData = new FormData()
-    formData.append("file", chunk)
-    formData.append("api_key", api_key)
-    formData.append("timestamp", timestamp)
-    formData.append("signature", signature)
-    formData.append("folder", folder)
-    formData.append("resource_type", resourceType)
-
-    const headers = {
-      "Content-Range": `bytes ${start}-${end - 1}/${totalSize}`,
-      "X-Unique-Upload-Id": uniqueId,
     }
+  })
 
-    const response = await axios.post(
-      `https://api.cloudinary.com/v1_1/${cloud_name}/${resourceType}/upload`,
-      formData,
-      { headers }
-    )
-
-    secureUrl = response.data.secure_url
-    
-    if (onProgress) {
-      onProgress(Math.round((end / totalSize) * 100))
-    }
-
-    start = end
-  }
-
-  return secureUrl
+  return publicUrl
 }
 
 const submitForm = async () => {
@@ -237,7 +191,7 @@ const submitForm = async () => {
 
     if (stepsProof.value) {
       uploadStatus.value = "Uploading Steps Screenshot: 0%"
-      stepsProofUrl = await uploadFileInChunks(
+      stepsProofUrl = await uploadFileToR2(
         stepsProof.value,
         "shapeup/steps",
         "Steps Screenshot",
@@ -247,7 +201,7 @@ const submitForm = async () => {
 
     if (fitnessVideo.value) {
       uploadStatus.value = "Uploading Fitness Video: 0%"
-      fitnessVideoUrl = await uploadFileInChunks(
+      fitnessVideoUrl = await uploadFileToR2(
         fitnessVideo.value,
         "shapeup/fitness",
         "Fitness Video",
@@ -257,7 +211,7 @@ const submitForm = async () => {
 
     if (foodPhoto.value) {
       uploadStatus.value = "Uploading Food Photo: 0%"
-      foodPhotoUrl = await uploadFileInChunks(
+      foodPhotoUrl = await uploadFileToR2(
         foodPhoto.value,
         "shapeup/food",
         "Food Photo",
@@ -267,7 +221,7 @@ const submitForm = async () => {
 
     if (fitnessAttendanceProof.value) {
       uploadStatus.value = "Uploading Attendance Proof: 0%"
-      attendanceUrl = await uploadFileInChunks(
+      attendanceUrl = await uploadFileToR2(
         fitnessAttendanceProof.value,
         "shapeup/attendance",
         "Attendance Proof",

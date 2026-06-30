@@ -56,6 +56,13 @@ class Config:
     UPLOAD_FOLDER = UPLOAD_DIR
     MAX_CONTENT_LENGTH = MAX_VIDEO_SIZE
 
+    # Cloudflare R2 Configuration
+    R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID")
+    R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID")
+    R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY")
+    R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "shapeup-submission")
+    R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL")
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

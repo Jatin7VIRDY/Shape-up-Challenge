@@ -1,8 +1,6 @@
 from datetime import date
 import time
-import cloudinary
-import cloudinary.utils
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import Participant, Submission, Challenge
@@ -12,32 +10,58 @@ from utils.dates import get_today_local
 bp = Blueprint("submissions", __name__, url_prefix="/api")
 
 
-@bp.route("/cloudinary-signature", methods=["POST"])
-def get_cloudinary_signature():
+@bp.route("/r2-presigned-url", methods=["POST"])
+def get_r2_presigned_url():
     try:
         data = request.json or {}
-        folder = data.get("folder", "shapeup")
+        key = data.get("key")
+        content_type = data.get("contentType", "application/octet-stream")
 
-        config = cloudinary.config()
-        if not config.api_secret or not config.api_key:
-            return jsonify({"message": "Cloudinary is not configured on the server"}), 500
+        if not key:
+            return jsonify({"message": "key is required"}), 400
 
-        timestamp = int(time.time())
-        params = {
-            "timestamp": timestamp,
-            "folder": folder,
-        }
+        r2_account_id = current_app.config.get("R2_ACCOUNT_ID")
+        r2_access_key_id = current_app.config.get("R2_ACCESS_KEY_ID")
+        r2_secret_access_key = current_app.config.get("R2_SECRET_ACCESS_KEY")
+        r2_bucket_name = current_app.config.get("R2_BUCKET_NAME", "shapeup-submission")
+        r2_public_url = current_app.config.get("R2_PUBLIC_URL")
 
-        signature = cloudinary.utils.api_sign_request(params, config.api_secret)
+        if not all([r2_account_id, r2_access_key_id, r2_secret_access_key]):
+            return jsonify({"message": "R2 storage is not configured on the server"}), 500
+
+        import boto3
+        from botocore.config import Config as BotoConfig
+
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{r2_account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=r2_access_key_id,
+            aws_secret_access_key=r2_secret_access_key,
+            config=BotoConfig(signature_version="s3v4"),
+            region_name="auto",
+        )
+
+        upload_url = s3_client.generate_presigned_url(
+            ClientMethod="put_object",
+            Params={
+                "Bucket": r2_bucket_name,
+                "Key": key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=3600,
+        )
+
+        # Normalize public URL to strip trailing slash
+        public_url_base = r2_public_url.rstrip("/")
+        public_url = f"{public_url_base}/{key}"
 
         return jsonify({
-            "signature": signature,
-            "timestamp": timestamp,
-            "api_key": config.api_key,
-            "cloud_name": config.cloud_name
+            "uploadUrl": upload_url,
+            "publicUrl": public_url
         }), 200
     except Exception as e:
-        return jsonify({"message": f"Failed to generate signature: {str(e)}"}), 500
+        return jsonify({"message": f"Failed to generate presigned URL: {str(e)}"}), 500
+
 
 
 @bp.route("/submission", methods=["POST"])

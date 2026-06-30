@@ -668,60 +668,62 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Review Panel -->
-    <transition name="panel-slide">
-      <div v-if="selectedSubmission" class="review-panel">
-        <div class="panel-top">
-          <div>
-            <h3 class="panel-title">{{ selectedSubmission.name }}</h3>
-            <p class="panel-sub">{{ selectedSubmission.employee_id }} · {{ selectedSubmission.steps }} steps reported · {{ selectedSubmission.submission_date }}</p>
+    <!-- Review Panel Modal -->
+    <transition name="modal-fade">
+      <div v-if="selectedSubmission" class="modal-overlay" @click.self="selectedSubmission = null">
+        <div class="review-panel">
+          <div class="panel-top">
+            <div>
+              <h3 class="panel-title">{{ selectedSubmission.name }}</h3>
+              <p class="panel-sub">{{ selectedSubmission.employee_id }} · {{ selectedSubmission.steps }} steps reported · {{ selectedSubmission.submission_date }}</p>
+            </div>
+            <button class="close-btn" @click="selectedSubmission = null">✕</button>
           </div>
-          <button class="close-btn" @click="selectedSubmission = null">✕</button>
-        </div>
 
-        <!-- Proofs -->
-        <div class="proofs-section">
-          <div class="proofs-label">Submitted Proofs</div>
-          <div class="proofs-grid">
-            <button v-if="selectedSubmission.steps_proof" class="proof-chip"
-              @click="openProof(selectedSubmission.steps_proof, 'image')">📸 Steps Screenshot</button>
-            <button v-if="selectedSubmission.fitness_video" class="proof-chip"
-              @click="openProof(selectedSubmission.fitness_video, 'video')">🎥 Fitness Video</button>
-            <button v-if="selectedSubmission.fitness_attendance_proof" class="proof-chip"
-              @click="openProof(selectedSubmission.fitness_attendance_proof, 'image')">🏋️ Attendance Proof</button>
-            <button v-if="selectedSubmission.food_photo" class="proof-chip"
-              @click="openProof(selectedSubmission.food_photo, 'image')">🥗 Food Photo</button>
-            <span v-if="!selectedSubmission.steps_proof && !selectedSubmission.fitness_video && !selectedSubmission.fitness_attendance_proof && !selectedSubmission.food_photo" class="no-proof">No proofs attached</span>
-          </div>
-        </div>
-
-        <!-- Score Inputs -->
-        <div class="score-section">
-          <div class="proofs-label">Award Points</div>
-          <div class="score-grid">
-            <div class="score-field">
-              <label>Approved Steps</label>
-              <input class="score-input" type="number" v-model="approved_steps" min="0" max="15000" />
-            </div>
-            <div class="score-field">
-              <label>Attendance Bonus</label>
-              <input class="score-input" type="number" v-model="fitness_attendance_bonus" min="0" max="1000" />
-            </div>
-            <div class="score-field">
-              <label>Fitness Video Bonus</label>
-              <input class="score-input" type="number" v-model="fitness_video_bonus" min="0" max="1000" />
-            </div>
-            <div class="score-field">
-              <label>Food Bonus</label>
-              <input class="score-input" type="number" v-model="food_bonus" min="0" max="1000" />
+          <!-- Proofs -->
+          <div class="proofs-section">
+            <div class="proofs-label">Submitted Proofs</div>
+            <div class="proofs-grid">
+              <button v-if="selectedSubmission.steps_proof" class="proof-chip"
+                @click="openProof(selectedSubmission.steps_proof, 'image')">📸 Steps Screenshot</button>
+              <button v-if="selectedSubmission.fitness_video" class="proof-chip"
+                @click="openProof(selectedSubmission.fitness_video, 'video')">🎥 Fitness Video</button>
+              <button v-if="selectedSubmission.fitness_attendance_proof" class="proof-chip"
+                @click="openProof(selectedSubmission.fitness_attendance_proof, 'image')">🏋️ Attendance Proof</button>
+              <button v-if="selectedSubmission.food_photo" class="proof-chip"
+                @click="openProof(selectedSubmission.food_photo, 'image')">🥗 Food Photo</button>
+              <span v-if="!selectedSubmission.steps_proof && !selectedSubmission.fitness_video && !selectedSubmission.fitness_attendance_proof && !selectedSubmission.food_photo" class="no-proof">No proofs attached</span>
             </div>
           </div>
-          <div class="total-preview">Total Points Preview: <strong>{{ previewTotal }}</strong></div>
-        </div>
 
-        <div class="panel-actions">
-          <button class="btn-approve" @click="submitReview('Approved')">✓ Approve</button>
-          <button class="btn-reject" @click="submitReview('Rejected')">✕ Reject</button>
+          <!-- Score Inputs -->
+          <div class="score-section">
+            <div class="proofs-label">Award Points</div>
+            <div class="score-grid">
+              <div class="score-field">
+                <label>Approved Steps</label>
+                <input class="score-input" type="number" v-model="approved_steps" min="0" max="15000" />
+              </div>
+              <div class="score-field">
+                <label>Attendance Bonus</label>
+                <input class="score-input" type="number" v-model="fitness_attendance_bonus" min="0" max="1000" />
+              </div>
+              <div class="score-field">
+                <label>Fitness Video Bonus</label>
+                <input class="score-input" type="number" v-model="fitness_video_bonus" min="0" max="1000" />
+              </div>
+              <div class="score-field">
+                <label>Food Bonus</label>
+                <input class="score-input" type="number" v-model="food_bonus" min="0" max="1000" />
+              </div>
+            </div>
+            <div class="total-preview">Total Points Preview: <strong>{{ previewTotal }}</strong></div>
+          </div>
+
+          <div class="panel-actions">
+            <button class="btn-approve" @click="submitReview('Approved')">✓ Approve</button>
+            <button class="btn-reject" @click="submitReview('Rejected')">✕ Reject</button>
+          </div>
         </div>
       </div>
     </transition>
@@ -733,6 +735,11 @@ onMounted(() => {
           <button class="modal-close" @click="proofModal = null">✕</button>
           <img v-if="proofModal.type === 'image'" :src="proofModal.url" class="proof-media" />
           <video v-else :src="proofModal.url" class="proof-media" controls autoplay />
+          <div class="modal-actions" style="margin-top: 15px; text-align: center;">
+            <a :href="proofModal.url" target="_blank" download class="btn-ghost" style="text-decoration: none; display: inline-flex; align-items: center; gap: 5px;">
+              📥 Open in New Tab / Download Proof
+            </a>
+          </div>
         </div>
       </div>
     </transition>
@@ -799,7 +806,7 @@ onMounted(() => {
 .review-btn:hover { opacity: 0.85; }
 
 /* Review Panel */
-.review-panel { background: var(--surface); border-radius: 16px; box-shadow: 0 4px 24px rgba(79,70,229,0.12); overflow: hidden; border-top: 4px solid var(--primary); }
+.review-panel { background: var(--surface); border-radius: 16px; box-shadow: 0 10px 48px rgba(0,0,0,0.28); overflow: hidden; border-top: 4px solid var(--primary); width: 100%; max-width: 550px; max-height: 90vh; overflow-y: auto; z-index: 310; }
 .panel-top { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.5rem 1.75rem 1.25rem; border-bottom: 1px solid var(--border); }
 .panel-title { font-size: 1.1rem; font-weight: 700; color: var(--text); margin: 0 0 0.2rem; }
 .panel-sub { font-size: 0.83rem; color: var(--text-muted); margin: 0; }
