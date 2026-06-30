@@ -3,9 +3,6 @@ import uuid
 from werkzeug.utils import secure_filename
 from flask import current_app
 
-# Cloudinary SDK imports
-import cloudinary
-import cloudinary.uploader
 
 ALLOWED_EXTENSIONS = {
     "steps_proof": {"jpg", "jpeg", "png", "webp", "gif", "heic", "heif"},
@@ -34,22 +31,6 @@ def save_upload(file, field: str) -> str | None:
     if not allowed_file(file.filename, field):
         raise ValueError(f"File type not allowed for {field}")
 
-    # Check if Cloudinary is configured
-    cloudinary_url = os.environ.get("CLOUDINARY_URL")
-    if cloudinary_url:
-        try:
-            # Cloudinary automatically parses CLOUDINARY_URL from the environment.
-            # We can upload the file stream directly.
-            subfolder = SUBFOLDER[field]
-            upload_result = cloudinary.uploader.upload(
-                file,
-                folder=f"shapeup/{subfolder}",
-                resource_type="auto"
-            )
-            return upload_result.get("secure_url")
-        except Exception as e:
-            # Fall back to local file storage if Cloudinary upload fails
-            current_app.logger.error(f"Cloudinary upload failed: {str(e)}")
 
     # Local fallback
     subfolder = SUBFOLDER[field]

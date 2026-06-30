@@ -212,7 +212,7 @@ def create_app(env: str = "default") -> Flask:
     # Ensure instance & upload dirs exist only if running locally without cloud services
     if not app.config.get("SQLALCHEMY_DATABASE_URI") or "sqlite" in app.config.get("SQLALCHEMY_DATABASE_URI", ""):
         os.makedirs(app.instance_path, exist_ok=True)
-    if not os.environ.get("CLOUDINARY_URL"):
+    if not os.environ.get("R2_ACCESS_KEY_ID"):
         os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
     # Extensions
