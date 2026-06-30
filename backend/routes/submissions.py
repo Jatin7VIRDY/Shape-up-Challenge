@@ -2,7 +2,7 @@ from datetime import date
 import time
 from flask import Blueprint, request, jsonify, current_app
 from sqlalchemy.exc import IntegrityError
-from extensions import db
+from extensions import db, limiter
 from models import Participant, Submission, Challenge
 from utils.uploads import save_upload
 from utils.dates import get_today_local
@@ -11,8 +11,10 @@ bp = Blueprint("submissions", __name__, url_prefix="/api")
 
 
 @bp.route("/r2-presigned-url", methods=["POST"])
+@limiter.limit("10 per minute")
 def get_r2_presigned_url():
     try:
+
         data = request.json or {}
         key = data.get("key")
         content_type = data.get("contentType", "application/octet-stream")
@@ -65,6 +67,7 @@ def get_r2_presigned_url():
 
 
 @bp.route("/submission", methods=["POST"])
+@limiter.limit("5 per minute")
 def create_submission():
     try:
         employee_id = request.form.get("employee_id", "").strip()

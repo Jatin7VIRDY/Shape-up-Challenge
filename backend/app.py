@@ -201,8 +201,9 @@
 #     app.run(debug=True)
 import os
 from flask import Flask, send_from_directory
-from extensions import db, cors
+from extensions import db, cors, limiter
 from config import config
+from flask import jsonify
 
 
 def create_app(env: str = "default") -> Flask:
@@ -218,6 +219,12 @@ def create_app(env: str = "default") -> Flask:
     # Extensions
     db.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
+    limiter.init_app(app)
+
+    @app.errorhandler(429)
+    def rate_limit_handler(e):
+        return jsonify({"message": "Too many requests. Please try again later."}), 429
+
 
     # Blueprints
     from routes import submissions_bp, admin_bp, challenges_bp, leaderboard_bp
