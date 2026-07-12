@@ -22,6 +22,12 @@ const routes = [
   },
 
   {
+    path: "/winner",
+    component: () => import("../views/WinnerDeclaration.vue"),
+    meta: { title: "Winner Declaration" }
+  },
+
+  {
     path: "/my/:employee_id",
     component: () => import("../views/MySubmissions.vue"),
     meta: { title: "My Submissions" }

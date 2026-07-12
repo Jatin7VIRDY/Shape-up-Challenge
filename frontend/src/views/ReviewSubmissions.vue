@@ -585,6 +585,7 @@ onMounted(() => {
         <p class="page-sub">Shape Up Challenge · Admin Panel</p>
       </div>
       <div class="header-actions">
+        <router-link to="/winner" class="btn-ghost" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">🏆 Winner Declaration</router-link>
         <a v-if="selectedChallenge" :href="`${BACKEND}/api/admin/export/${selectedChallenge}`" class="btn-export" target="_blank">⬇ Export Excel</a>
       </div>
     </div>
@@ -608,6 +609,14 @@ onMounted(() => {
       @click="openManageChallenges"
     >
       Manage Challenges
+    </button>
+
+    <button
+      class="btn-manage"
+      style="background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border);"
+      @click="$router.push('/winner')"
+    >
+      🏆 Winner Declaration
     </button>
   </div>
 </div>

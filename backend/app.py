@@ -227,17 +227,19 @@ def create_app(env: str = "default") -> Flask:
 
 
     # Blueprints
-    from routes import submissions_bp, admin_bp, challenges_bp, leaderboard_bp
+    from routes import submissions_bp, admin_bp, challenges_bp, leaderboard_bp, winner_bp
     
     # Exempt admin-related blueprints from the rate limiter
     limiter.exempt(admin_bp)
     limiter.exempt(challenges_bp)
     limiter.exempt(leaderboard_bp)
+    limiter.exempt(winner_bp)
 
     app.register_blueprint(submissions_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(challenges_bp)
     app.register_blueprint(leaderboard_bp)
+    app.register_blueprint(winner_bp)
 
     # Backwards-compat: old frontend used /api/submission/<id>/review and /api/dashboard-stats
     from routes.admin import bp as admin_bp2
@@ -288,4 +290,4 @@ def create_app(env: str = "default") -> Flask:
 if __name__ == "__main__":
     env = os.environ.get("FLASK_ENV", "development")
     app = create_app(env)
-    app.run(debug=(env == "development"), host="0.0.0.0", port=5000)
+    app.run(debug=(env == "development"), host="0.0.0.0", port=5001)
