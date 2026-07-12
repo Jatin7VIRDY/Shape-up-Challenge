@@ -350,6 +350,16 @@ const showToast = (type, msg) => {
   setTimeout(() => { toast.value = null }, 3500)
 }
 
+let searchTimeout = null
+const handleSearchInput = () => {
+  if (searchTimeout) {
+    clearTimeout(searchTimeout)
+  }
+  searchTimeout = setTimeout(() => {
+    fetchAll()
+  }, 300)
+}
+
 const previewTotal = computed(() =>
   Number(approved_steps.value || 0) +
   Number(fitness_video_bonus.value || 0) +
@@ -627,7 +637,7 @@ onMounted(() => {
 
     <!-- Filters -->
     <div class="filter-bar">
-      <input class="search-input" v-model="search" placeholder="🔍 Search by name or ID…" @input="fetchAll" />
+      <input class="search-input" v-model="search" placeholder="🔍 Search by name or ID…" @input="handleSearchInput" />
       <select class="filter-select" v-model="selectedChallenge" @change="fetchAll">
         <option value="">All challenges</option>
         <option v-for="c in challenges" :key="c.id" :value="c.id">{{ c.name }}</option>

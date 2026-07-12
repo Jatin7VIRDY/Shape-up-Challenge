@@ -67,7 +67,7 @@ def get_r2_presigned_url():
 
 
 @bp.route("/submission", methods=["POST"])
-@limiter.limit("5 per minute")
+@limiter.limit("10 per minute")
 def create_submission():
     try:
         employee_id = request.form.get("employee_id", "").strip()
@@ -164,6 +164,7 @@ def create_submission():
 
 
 @bp.route("/submission", methods=["GET"])
+@limiter.exempt
 def get_submissions():
     status_filter = request.args.get("status")
     challenge_id = request.args.get("challenge_id")
@@ -188,6 +189,7 @@ def get_submissions():
 
 
 @bp.route("/my-submissions/<employee_id>", methods=["GET"])
+@limiter.exempt
 def get_my_submissions(employee_id):
     participant = Participant.query.filter_by(employee_id=employee_id).first()
     if not participant:

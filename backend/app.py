@@ -228,6 +228,12 @@ def create_app(env: str = "default") -> Flask:
 
     # Blueprints
     from routes import submissions_bp, admin_bp, challenges_bp, leaderboard_bp
+    
+    # Exempt admin-related blueprints from the rate limiter
+    limiter.exempt(admin_bp)
+    limiter.exempt(challenges_bp)
+    limiter.exempt(leaderboard_bp)
+
     app.register_blueprint(submissions_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(challenges_bp)
@@ -267,6 +273,7 @@ def create_app(env: str = "default") -> Flask:
     upload_root = app.config["UPLOAD_FOLDER"]
 
     @app.route("/uploads/<folder>/<filename>")
+    @limiter.exempt
     def serve_upload(folder, filename):
         folder_path = os.path.join(upload_root, folder)
         return send_from_directory(folder_path, filename)
