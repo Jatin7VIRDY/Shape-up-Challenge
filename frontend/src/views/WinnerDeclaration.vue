@@ -139,6 +139,18 @@ const calculateWinner = async () => {
   } catch (err) {
     const backendErrors = err.response?.data?.errors || [err.message]
     calculationErrors.value = backendErrors
+
+    // If session expired or missing on backend, clear local session state so user can re-upload easily
+    if (err.response?.status === 404 || err.response?.data?.message?.includes("session")) {
+      sessionId.value = ""
+      localStorage.removeItem("winnerSessionId")
+      uploads.value = {
+        day0: { file: null, name: "", loading: false, errors: [] },
+        day45: { file: null, name: "", loading: false, errors: [] },
+        day90: { file: null, name: "", loading: false, errors: [] },
+      }
+    }
+
     Swal.fire({
       icon: "error",
       title: "Calculation Failed",
@@ -147,6 +159,20 @@ const calculateWinner = async () => {
   } finally {
     isCalculating.value = false
   }
+}
+
+// Export Excel handler with check
+const exportExcel = (type) => {
+  if (!sessionId.value) {
+    Swal.fire({
+      icon: "warning",
+      title: "No Session Found",
+      text: "Please upload participant Excel files and calculate rankings before exporting."
+    })
+    return
+  }
+  const exportUrl = `${BACKEND}/api/winner/export?session_id=${sessionId.value}&type=${type}`
+  window.open(exportUrl, "_blank")
 }
 
 // Reset Session
@@ -504,8 +530,8 @@ onMounted(() => {
               </div>
 
               <div class="btn-group">
-                <a :href="`${BACKEND}/api/winner/export?session_id=${sessionId}&type=all`" target="_blank" class="btn-export-full">💾 Full Excel</a>
-                <a :href="`${BACKEND}/api/winner/export?session_id=${sessionId}&type=top10`" target="_blank" class="btn-export-top10">💾 Top 10 Excel</a>
+                <button @click="exportExcel('all')" class="btn-export-full">💾 Full Excel</button>
+                <button @click="exportExcel('top10')" class="btn-export-top10">💾 Top 10 Excel</button>
                 <button @click="triggerPrint" class="btn-print">🖨️ Print Results</button>
               </div>
             </div>

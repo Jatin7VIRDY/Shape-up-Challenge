@@ -10,11 +10,27 @@ class ValidationError(Exception):
 class WinnerService:
     # Column mapping configurations (case-insensitive)
     HEADER_CANDIDATES = {
-        "employee_id": ["employee id", "employee_id", "employeeid", "id", "emp id", "empid"],
-        "name": ["name", "participant name", "employee name", "fullname", "full name"],
-        "weight": ["weight", "weight (kg)", "weight(kg)", "weight (lbs)", "weight(lbs)", "wt"],
-        "waist": ["waist", "waist (in)", "waist (cm)", "waist(in)", "waist(cm)"],
-        "hip": ["hip", "hip (in)", "hip (cm)", "hip(in)", "hip(cm)"]
+        "employee_id": [
+            "employee id", "employee_id", "employeeid", "id", "emp id", "empid", 
+            "emp_id", "emp code", "empcode", "employee code", "emp no", "empno", 
+            "participant id", "user id", "sl. no.", "sl no", "sr no", "sr. no."
+        ],
+        "name": [
+            "name", "participant name", "employee name", "fullname", "full name", 
+            "participant", "employee", "member name"
+        ],
+        "weight": [
+            "weight", "weight (kg)", "weight(kg)", "weight (lbs)", "weight(lbs)", 
+            "wt", "weight kg", "wt (kg)", "wt(kg)", "weight in kg", "initial weight", "final weight"
+        ],
+        "waist": [
+            "waist", "waist (in)", "waist (cm)", "waist(in)", "waist(cm)", 
+            "waist size", "waist (inches)", "waist(inches)", "waist in inches", "initial waist", "final waist"
+        ],
+        "hip": [
+            "hip", "hip (in)", "hip (cm)", "hip(in)", "hip(cm)", 
+            "hip size", "hip (inches)", "hip(inches)", "hip in inches", "hips", "initial hip", "final hip"
+        ]
     }
 
     @staticmethod
@@ -22,10 +38,12 @@ class WinnerService:
         if val is None:
             return ""
         val_str = str(val).strip()
-        # Remove trailing .0 from floating numbers if read as such
-        if val_str.endswith(".0"):
-            val_str = val_str[:-2]
-        return val_str
+        # Remove trailing .0 or .00 from floating numbers if read as such
+        import re
+        if re.match(r"^\d+\.0+$", val_str):
+            val_str = val_str.split(".")[0]
+        # Uppercase to ensure case-insensitive matching across files (e.g. emp01 vs EMP01)
+        return val_str.upper()
 
     @classmethod
     def parse_and_validate_sheet(cls, file_data: bytes, sheet_label: str) -> tuple[dict, list[str]]:
@@ -47,38 +65,50 @@ class WinnerService:
         if not ws or ws.max_row == 0:
             return {}, [f"[{sheet_label}] Spreadsheet is empty"]
 
-        # Read first row for headers
-        header_row = [cell.value for cell in ws[1]]
+        # Dynamically scan top rows (up to 15) to find the table header row
+        header_row_idx = None
         header_indices = {}
 
-        # Resolve headers
-        for col_name, candidates in cls.HEADER_CANDIDATES.items():
-            found_idx = None
-            for idx, cell_val in enumerate(header_row):
-                if cell_val is not None:
-                    normalized_cell = str(cell_val).strip().lower()
-                    if normalized_cell in candidates:
-                        found_idx = idx
-                        break
-            if found_idx is None:
-                errors.append(f"[{sheet_label}] Missing required column for '{col_name.replace('_', ' ').title()}'")
-            else:
-                header_indices[col_name] = found_idx
+        max_scan_row = min(15, ws.max_row)
+        for r_idx in range(1, max_scan_row + 1):
+            row_vals = [ws.cell(row=r_idx, column=c_idx).value for c_idx in range(1, ws.max_column + 1)]
+            temp_indices = {}
+            for col_name, candidates in cls.HEADER_CANDIDATES.items():
+                for c_idx, cell_val in enumerate(row_vals):
+                    if cell_val is not None:
+                        normalized_cell = str(cell_val).strip().lower()
+                        if normalized_cell in candidates:
+                            temp_indices[col_name] = c_idx
+                            break
+            # Check if all required 5 columns were resolved in this row
+            if len(temp_indices) == len(cls.HEADER_CANDIDATES):
+                header_row_idx = r_idx
+                header_indices = temp_indices
+                break
 
-        if errors:
+        if not header_row_idx:
+            # Generate detailed error messages for missing columns
+            # Check row 1 or overall missing candidates for diagnostics
+            first_row_vals = [str(ws.cell(row=1, column=c_idx).value or "").strip().lower() for c_idx in range(1, ws.max_column + 1)]
+            for col_name, candidates in cls.HEADER_CANDIDATES.items():
+                found = any(v in candidates for v in first_row_vals)
+                if not found:
+                    errors.append(f"[{sheet_label}] Missing required column for '{col_name.replace('_', ' ').title()}'")
+            if not errors:
+                errors.append(f"[{sheet_label}] Could not find complete header row in top rows of sheet.")
             return {}, errors
 
         processed_ids = set()
 
-        # Parse rows starting from row 2
-        for row_idx in range(2, ws.max_row + 1):
-            row_cells = [ws.cell(row=row_idx, column=col_idx).value for col_idx in range(1, ws.max_column + 1)]
+        # Parse data rows starting right after the detected header row
+        for row_idx in range(header_row_idx + 1, ws.max_row + 1):
+            row_cells = [ws.cell(row=row_idx, column=col_idx + 1).value for col_idx in range(ws.max_column)]
             
             # Check if row is completely empty
             if all(val is None or str(val).strip() == "" for val in row_cells):
                 continue
 
-            # Read raw values
+            # Read raw values using header column indices
             raw_id = row_cells[header_indices["employee_id"]]
             raw_name = row_cells[header_indices["name"]]
             raw_weight = row_cells[header_indices["weight"]]
@@ -156,11 +186,11 @@ class WinnerService:
 
         # Exclude list warnings
         only_in_day0 = day0_ids - day90_ids
-        for eid in only_in_day0:
+        for eid in sorted(only_in_day0):
             warnings.append(f"Participant '{day0_data[eid]['name']}' ({eid}) is in Day 0 but missing in Day 90. Excluded from rankings.")
 
         only_in_day90 = day90_ids - day0_ids
-        for eid in only_in_day90:
+        for eid in sorted(only_in_day90):
             warnings.append(f"Participant '{day90_data[eid]['name']}' ({eid}) is in Day 90 but missing in Day 0. Excluded from rankings.")
 
         common_ids = day0_ids & day90_ids
@@ -214,8 +244,12 @@ class WinnerService:
             # Final Score = (NormalizedWeight * 0.5) + (NormalizedWHR * 0.5)
             r["final_score"] = (r["normalized_weight"] * 0.5) + (r["normalized_whr"] * 0.5)
 
-        # Sort descending by Final Score
-        sorted_results = sorted(raw_results, key=lambda x: x["final_score"], reverse=True)
+        # Sort descending by Final Score, using weight loss and WHR as secondary tie-breakers
+        sorted_results = sorted(
+            raw_results, 
+            key=lambda x: (x["final_score"], x["weight_loss_percent"], x["whr_improvement_percent"]), 
+            reverse=True
+        )
 
         # Assign ranks
         for idx, r in enumerate(sorted_results, 1):
