@@ -17,6 +17,9 @@ MAX_VIDEO_SIZE = 200 * 1024 * 1024  # 200 MB
 def format_db_url(url: str) -> str:
     if not url:
         return ""
+    # Convert legacy postgres:// prefix to postgresql:// for SQLAlchemy compatibility
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
     if not url.startswith("postgresql://") and not url.startswith("postgresql+psycopg2://"):
         return url
     try:
@@ -71,7 +74,7 @@ class DevelopmentConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
-    SQLALCHEMY_DATABASE_URI = format_db_url(os.environ.get("DATABASE_URL")) or ""
+    SQLALCHEMY_DATABASE_URI = format_db_url(os.environ.get("DATABASE_URL")) or f"sqlite:///{os.path.join(BACKEND_DIR, 'instance', 'shapeup.db')}"
 
 
 config = {
