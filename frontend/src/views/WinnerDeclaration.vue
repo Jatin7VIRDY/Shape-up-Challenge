@@ -12,9 +12,9 @@ const isAuthenticated = ref(localStorage.getItem("reviewerAuth") === "true")
 // Upload States
 const sessionId = ref(localStorage.getItem("winnerSessionId") || "")
 const uploads = ref({
-  day0: { file: null, name: "", loading: false, errors: [] },
-  day45: { file: null, name: "", loading: false, errors: [] },
-  day90: { file: null, name: "", loading: false, errors: [] },
+  day0: { file: null, name: "", loading: false, errors: [], total_rows: 0, valid_count: 0, incomplete_count: 0, incomplete_participants: [] },
+  day45: { file: null, name: "", loading: false, errors: [], total_rows: 0, valid_count: 0, incomplete_count: 0, incomplete_participants: [] },
+  day90: { file: null, name: "", loading: false, errors: [], total_rows: 0, valid_count: 0, incomplete_count: 0, incomplete_participants: [] },
 })
 
 // Processing States
@@ -25,6 +25,7 @@ const calculationWarnings = ref([])
 // Results
 const summary = ref(null)
 const rankings = ref([]) // original rankings from backend
+const incompleteRecords = ref([])
 const searchQuery = ref("")
 const topN = ref("10") // "10", "25", "50", "all"
 
@@ -80,6 +81,10 @@ const handleFileUpload = async (event, day) => {
       }
       uploads.value[day].name = file.name
       uploads.value[day].file = file
+      uploads.value[day].total_rows = res.data.total_rows || 0
+      uploads.value[day].valid_count = res.data.valid_count || 0
+      uploads.value[day].incomplete_count = res.data.incomplete_count || 0
+      uploads.value[day].incomplete_participants = res.data.incomplete_participants || []
       
       // Clear warnings/errors
       uploads.value[day].errors = []
@@ -118,6 +123,7 @@ const calculateWinner = async () => {
   calculationWarnings.value = []
   summary.value = null
   rankings.value = []
+  incompleteRecords.value = []
 
   try {
     const res = await API.post("/api/winner/calculate", {
@@ -127,6 +133,7 @@ const calculateWinner = async () => {
     if (res.data.success) {
       summary.value = res.data.summary
       rankings.value = res.data.rankings
+      incompleteRecords.value = res.data.incomplete_records || []
       calculationWarnings.value = res.data.warnings || []
       
       Swal.fire({
@@ -346,6 +353,14 @@ onMounted(() => {
               <input type="file" accept=".xlsx, .xls" @change="handleFileUpload($event, 'day0')" :disabled="uploads.day0.loading" />
             </label>
 
+            <div class="card-stats" v-if="uploads.day0.total_rows">
+              <div class="stat-text">✓ {{ uploads.day0.total_rows }} rows processed</div>
+              <div class="stat-text text-green font-semibold">{{ uploads.day0.valid_count }} eligible records</div>
+              <div class="stat-text text-amber font-semibold" v-if="uploads.day0.incomplete_count">
+                ⚠ {{ uploads.day0.incomplete_count }} incomplete records
+              </div>
+            </div>
+
             <div class="card-spinner" v-if="uploads.day0.loading">Validating...</div>
 
             <!-- Errors -->
@@ -370,6 +385,14 @@ onMounted(() => {
               <input type="file" accept=".xlsx, .xls" @change="handleFileUpload($event, 'day45')" :disabled="uploads.day45.loading" />
             </label>
 
+            <div class="card-stats" v-if="uploads.day45.total_rows">
+              <div class="stat-text">✓ {{ uploads.day45.total_rows }} rows processed</div>
+              <div class="stat-text text-green font-semibold">{{ uploads.day45.valid_count }} eligible records</div>
+              <div class="stat-text text-amber font-semibold" v-if="uploads.day45.incomplete_count">
+                ⚠ {{ uploads.day45.incomplete_count }} incomplete records
+              </div>
+            </div>
+
             <div class="card-spinner" v-if="uploads.day45.loading">Validating...</div>
 
             <!-- Errors -->
@@ -393,6 +416,14 @@ onMounted(() => {
               <span>{{ uploads.day90.name ? 'Replace File' : 'Choose Excel File' }}</span>
               <input type="file" accept=".xlsx, .xls" @change="handleFileUpload($event, 'day90')" :disabled="uploads.day90.loading" />
             </label>
+
+            <div class="card-stats" v-if="uploads.day90.total_rows">
+              <div class="stat-text">✓ {{ uploads.day90.total_rows }} rows processed</div>
+              <div class="stat-text text-green font-semibold">{{ uploads.day90.valid_count }} eligible records</div>
+              <div class="stat-text text-amber font-semibold" v-if="uploads.day90.incomplete_count">
+                ⚠ {{ uploads.day90.incomplete_count }} incomplete records
+              </div>
+            </div>
 
             <div class="card-spinner" v-if="uploads.day90.loading">Validating...</div>
 
@@ -484,6 +515,40 @@ onMounted(() => {
               <span class="summary-value">{{ summary.highest_whr_improvement }}%</span>
               <span class="summary-sub">Max WHR Ratio Imp</span>
             </div>
+          </div>
+        </div>
+
+        <!-- Incomplete Participant Data Section -->
+        <div class="section-card incomplete-section no-print" v-if="incompleteRecords.length">
+          <div class="incomplete-hdr">
+            <h3>⚠ Incomplete Participant Data</h3>
+            <p class="incomplete-sub">
+              <strong>{{ summary?.eligible_count }}</strong> participants eligible for ranking · 
+              <strong>{{ incompleteRecords.length }}</strong> participants excluded due to incomplete measurement records
+            </p>
+          </div>
+
+          <div class="table-wrap">
+            <table class="rankings-table incomplete-table">
+              <thead>
+                <tr>
+                  <th>Participant</th>
+                  <th>Stage</th>
+                  <th>Missing / Issues</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(inc, idx) in incompleteRecords" :key="idx" class="row-incomplete">
+                  <td class="font-bold">{{ inc.participant }}</td>
+                  <td><span class="stage-tag">{{ inc.stage }}</span></td>
+                  <td class="text-amber font-mono">{{ inc.missing_data }}</td>
+                  <td><span class="badge-incomplete">{{ inc.status }}</span></td>
+                  <td class="text-muted text-sm">{{ inc.reason }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -1464,11 +1529,64 @@ html.dark .rankings-table tbody tr.row-winner {
 .text-green { color: var(--green); }
 .text-muted { color: var(--text-muted); }
 
-.empty-state {
-  padding: 3rem;
-  text-align: center;
+.card-stats {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.stat-text {
   color: var(--text-muted);
-  font-size: 0.9rem;
+}
+
+.text-amber {
+  color: #d97706;
+}
+
+.incomplete-section {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  margin-bottom: 1.5rem;
+}
+
+html.dark .incomplete-section {
+  background: #231e13;
+  border-color: #78350f;
+}
+
+.incomplete-hdr h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #b45309;
+  margin: 0 0 0.25rem;
+}
+
+.incomplete-sub {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0 0 1rem;
+}
+
+.stage-tag {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-incomplete {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 /* Print Styling */

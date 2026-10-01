@@ -39,17 +39,16 @@ def upload_file():
         label = "Day 0" if day == "day0" else "Day 45" if day == "day45" else "Day 90"
         
         # Parse and validate the sheet structure and data
-        data, errors = WinnerService.parse_and_validate_sheet(file_bytes, label)
+        parsed_res = WinnerService.parse_and_validate_sheet(file_bytes, label)
         
-        if errors:
+        if not parsed_res["success"]:
             return jsonify({
                 "success": False,
-                "message": f"Validation failed in {label} sheet",
-                "errors": errors,
+                "message": parsed_res["file_error"],
                 "session_id": session_id
             }), 400
 
-        # If validation succeeds, save the file to disk in the session directory
+        # Save the file to disk in the session directory
         upload_root = current_app.config["UPLOAD_FOLDER"]
         dest_dir = os.path.join(upload_root, "winner_declaration", session_id)
         os.makedirs(dest_dir, exist_ok=True)
@@ -62,7 +61,11 @@ def upload_file():
             "success": True,
             "session_id": session_id,
             "filename": file.filename,
-            "message": f"{label} Excel uploaded and verified successfully!"
+            "message": f"{label} Excel uploaded successfully!",
+            "total_rows": parsed_res["total_rows"],
+            "valid_count": parsed_res["valid_count"],
+            "incomplete_count": parsed_res["incomplete_count"],
+            "incomplete_participants": parsed_res["incomplete_participants"]
         })
 
     except Exception as e:
@@ -105,26 +108,25 @@ def calculate_leaderboard():
         with open(os.path.join(session_dir, "day90.xlsx"), "rb") as f:
             day90_bytes = f.read()
 
-        # Parse again (robust check)
-        day0_data, d0_errs = WinnerService.parse_and_validate_sheet(day0_bytes, "Day 0")
-        day45_data, d45_errs = WinnerService.parse_and_validate_sheet(day45_bytes, "Day 45")
-        day90_data, d90_errs = WinnerService.parse_and_validate_sheet(day90_bytes, "Day 90")
+        d0_res = WinnerService.parse_and_validate_sheet(day0_bytes, "Day 0")
+        d45_res = WinnerService.parse_and_validate_sheet(day45_bytes, "Day 45")
+        d90_res = WinnerService.parse_and_validate_sheet(day90_bytes, "Day 90")
 
-        all_errors = d0_errs + d45_errs + d90_errs
-        if all_errors:
-            return jsonify({
-                "success": False,
-                "message": "Validation errors detected in uploaded sheets.",
-                "errors": all_errors
-            }), 400
+        if not d0_res["success"]:
+            return jsonify({"success": False, "message": f"Day 0 File Error: {d0_res['file_error']}"}), 400
+        if not d45_res["success"]:
+            return jsonify({"success": False, "message": f"Day 45 File Error: {d45_res['file_error']}"}), 400
+        if not d90_res["success"]:
+            return jsonify({"success": False, "message": f"Day 90 File Error: {d90_res['file_error']}"}), 400
 
         # Calculate rankings
-        summary, rankings, warnings = WinnerService.calculate_results(day0_data, day45_data, day90_data)
+        summary, rankings, incomplete_records, warnings = WinnerService.calculate_results(d0_res, d45_res, d90_res)
 
         return jsonify({
             "success": True,
             "summary": summary,
             "rankings": rankings,
+            "incomplete_records": incomplete_records,
             "warnings": warnings
         })
 

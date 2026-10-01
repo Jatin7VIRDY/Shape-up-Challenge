@@ -3,11 +3,6 @@ import re
 import openpyxl
 from io import BytesIO
 
-class ValidationError(Exception):
-    def __init__(self, errors):
-        super().__init__("; ".join(errors))
-        self.errors = errors
-
 class WinnerService:
     # Column mapping configurations (case-insensitive)
     HEADER_CANDIDATES = {
@@ -62,26 +57,26 @@ class WinnerService:
         return name
 
     @classmethod
-    def parse_and_validate_sheet(cls, file_data: bytes, sheet_label: str) -> tuple[dict, list[str]]:
+    def parse_and_validate_sheet(cls, file_data: bytes, sheet_label: str) -> dict:
         """
         Parses an Excel sheet from bytes.
-        Validates only required calculation fields: Participant Identifier, Weight, Waist circumference, Hip circumference.
-        Ignores completely blank rows and optional measurement fields (Email, BMI, BMR, Pressure, etc.).
-        Returns:
-            data: dict of {employee_id: {name, weight, waist, hip, whr}}
-            errors: list of participant-specific validation error strings
+        Does NOT return success=False merely because individual participants have missing measurements.
+        Only returns success=False for catastrophic file-level failures (unreadable file, empty sheet, missing table headers).
         """
-        errors = []
-        data = {}
-
         try:
             wb = openpyxl.load_workbook(BytesIO(file_data), data_only=True)
             ws = wb.active
         except Exception as e:
-            return {}, [f"[{sheet_label}] Invalid Excel format or file could not be read: {str(e)}"]
+            return {
+                "success": False,
+                "file_error": f"Invalid Excel format or file could not be read: {str(e)}"
+            }
 
         if not ws or ws.max_row == 0:
-            return {}, [f"[{sheet_label}] Spreadsheet is empty"]
+            return {
+                "success": False,
+                "file_error": "Spreadsheet is empty"
+            }
 
         # Dynamically scan top rows (up to 15) to find the table header row
         header_row_idx = None
@@ -149,18 +144,24 @@ class WinnerService:
                 break
 
         if not header_row_idx:
-            errors.append(f"[{sheet_label}] Could not find required table columns ('Name' and 'Weight') in sheet headers.")
-            return {}, errors
+            return {
+                "success": False,
+                "file_error": "Could not find required table columns ('Name' and 'Weight') in sheet headers."
+            }
 
+        eligible_data = {}
+        incomplete_participants = []
         processed_ids = set()
+        total_rows_processed = 0
 
-        # Parse data rows starting right after the detected header row
         for row_idx in range(header_row_idx + 1, ws.max_row + 1):
             row_cells = [ws.cell(row=row_idx, column=col_idx + 1).value for col_idx in range(ws.max_column)]
             
-            # 1. Ignore completely blank rows (all cells empty or whitespace)
+            # 1. Ignore completely blank rows
             if all(val is None or str(val).strip() == "" for val in row_cells):
                 continue
+
+            total_rows_processed += 1
 
             raw_id = row_cells[header_indices["employee_id"]] if header_indices["employee_id"] < len(row_cells) else None
             raw_name = row_cells[header_indices["name"]] if header_indices["name"] < len(row_cells) else None
@@ -168,20 +169,18 @@ class WinnerService:
 
             emp_id = cls.clean_employee_id(raw_id)
             name = cls.clean_name(raw_name)
-            display_label = f"Participant: {name}" if name else f"ID: {emp_id}" if emp_id else f"Row {row_idx}"
+            participant_display = name or (f"ID: {emp_id}" if emp_id else f"Row {row_idx}")
 
-            row_has_error = False
+            missing_fields = []
 
             if not emp_id:
-                errors.append(f"[{sheet_label}] Row {row_idx}: Participant identifier is missing")
-                row_has_error = True
+                missing_fields.append("Participant Identifier")
             elif emp_id in processed_ids:
-                errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Duplicate Participant Identifier '{emp_id}'")
-                row_has_error = True
+                missing_fields.append("Duplicate Identifier")
             else:
                 processed_ids.add(emp_id)
 
-            # Validate Weight (required)
+            # Weight validation
             weight = None
             if raw_weight is not None and str(raw_weight).strip() != "":
                 try:
@@ -190,12 +189,10 @@ class WinnerService:
                         weight = f_val
                 except ValueError:
                     pass
-
             if weight is None:
-                errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Weight is missing or invalid")
-                row_has_error = True
+                missing_fields.append("Weight")
 
-            # Validate Waist Circumference (required if column exists in sheet)
+            # Waist validation
             waist = None
             if "waist" in header_indices:
                 raw_waist = row_cells[header_indices["waist"]] if header_indices["waist"] < len(row_cells) else None
@@ -207,10 +204,9 @@ class WinnerService:
                     except ValueError:
                         pass
                 if waist is None:
-                    errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Waist circumference is missing or invalid")
-                    row_has_error = True
+                    missing_fields.append("Waist")
 
-            # Validate Hip Circumference (required if column exists in sheet)
+            # Hip validation
             hip = None
             if "hip" in header_indices:
                 raw_hip = row_cells[header_indices["hip"]] if header_indices["hip"] < len(row_cells) else None
@@ -222,16 +218,22 @@ class WinnerService:
                     except ValueError:
                         pass
                 if hip is None:
-                    errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Hip circumference is missing or invalid")
-                    row_has_error = True
+                    missing_fields.append("Hip")
 
-            # If required fields have errors for this row, do not include row in results data
-            if row_has_error:
+            if missing_fields:
+                incomplete_participants.append({
+                    "row": row_idx,
+                    "participant": participant_display,
+                    "stage": sheet_label,
+                    "missing_data": ", ".join(missing_fields),
+                    "status": "Incomplete",
+                    "reason": f"Missing {sheet_label} {', '.join(missing_fields)}"
+                })
                 continue
 
             whr = (waist / hip) if (waist and hip) else None
 
-            data[emp_id] = {
+            eligible_data[emp_id] = {
                 "name": name or emp_id,
                 "weight": weight,
                 "waist": waist,
@@ -239,50 +241,87 @@ class WinnerService:
                 "whr": whr
             }
 
-        return data, errors
+        return {
+            "success": True,
+            "sheet_label": sheet_label,
+            "total_rows": total_rows_processed,
+            "valid_count": len(eligible_data),
+            "incomplete_count": len(incomplete_participants),
+            "data": eligible_data,
+            "incomplete_participants": incomplete_participants,
+            "file_error": None
+        }
 
     @classmethod
-    def calculate_results(cls, day0_data: dict, day45_data: dict, day90_data: dict) -> tuple[dict, list[dict], list[str]]:
+    def calculate_results(cls, d0_res: dict, d45_res: dict, d90_res: dict) -> tuple[dict, list[dict], list[dict], list[str]]:
         """
-        Merges datasets and calculates final rankings and metrics.
+        Merges datasets and calculates final rankings for eligible participants only.
+        Classifies non-eligible participants into incomplete_records.
         Returns:
-            summary: dict containing stats & winner info
-            rankings: list of dict rankings
-            warnings: list of warning messages
+            summary: dict
+            rankings: list of dicts (eligible only)
+            incomplete_records: list of dicts (excluded participants)
+            warnings: list of strings
         """
+        d0_data = d0_res.get("data", {}) if isinstance(d0_res, dict) else d0_res
+        d90_data = d90_res.get("data", {}) if isinstance(d90_res, dict) else d90_res
+        d45_data = d45_res.get("data", {}) if isinstance(d45_res, dict) else d45_res
+
+        # Collect all incomplete participant records from all 3 files
+        incomplete_records = []
+        if isinstance(d0_res, dict):
+            incomplete_records.extend(d0_res.get("incomplete_participants", []))
+        if isinstance(d45_res, dict):
+            incomplete_records.extend(d45_res.get("incomplete_participants", []))
+        if isinstance(d90_res, dict):
+            incomplete_records.extend(d90_res.get("incomplete_participants", []))
+
+        day0_ids = set(d0_data.keys())
+        day90_ids = set(d90_data.keys())
+        day45_ids = set(d45_data.keys())
+
+        # Participants in Day 0 but missing in Day 90
+        only_in_d0 = day0_ids - day90_ids
+        for eid in sorted(only_in_d0):
+            incomplete_records.append({
+                "row": "-",
+                "participant": d0_data[eid]["name"],
+                "stage": "Day 90",
+                "missing_data": "Final Measurements (Day 90)",
+                "status": "Incomplete",
+                "reason": f"Participant '{d0_data[eid]['name']}' ({eid}) has Day 0 measurements but is missing in Day 90 sheet."
+            })
+
+        # Participants in Day 90 but missing in Day 0
+        only_in_d90 = day90_ids - day0_ids
+        for eid in sorted(only_in_d90):
+            incomplete_records.append({
+                "row": "-",
+                "participant": d90_data[eid]["name"],
+                "stage": "Day 0",
+                "missing_data": "Baseline Measurements (Day 0)",
+                "status": "Incomplete",
+                "reason": f"Participant '{d90_data[eid]['name']}' ({eid}) has Day 90 measurements but is missing in Day 0 sheet."
+            })
+
+        eligible_ids = day0_ids & day90_ids
+        if not eligible_ids:
+            raise ValueError("No participants have complete Day 0 and Day 90 measurements.")
+
         warnings = []
-        
-        # Determine common participants in day 0 and day 90
-        day0_ids = set(day0_data.keys())
-        day90_ids = set(day90_data.keys())
-        day45_ids = set(day45_data.keys())
-
-        # Exclude list warnings
-        only_in_day0 = day0_ids - day90_ids
-        for eid in sorted(only_in_day0):
-            warnings.append(f"Participant '{day0_data[eid]['name']}' ({eid}) is in Day 0 but missing in Day 90. Excluded from rankings.")
-
-        only_in_day90 = day90_ids - day0_ids
-        for eid in sorted(only_in_day90):
-            warnings.append(f"Participant '{day90_data[eid]['name']}' ({eid}) is in Day 90 but missing in Day 0. Excluded from rankings.")
-
-        common_ids = day0_ids & day90_ids
-        if not common_ids:
-            raise ValueError("No common participants found between Day 0 and Day 90 Excel sheets.")
-
         raw_results = []
         max_weight_loss_pct = 0.0
         max_whr_imp_pct = 0.0
         has_whr_data = False
 
-        for eid in common_ids:
-            d0 = day0_data[eid]
-            d90 = day90_data[eid]
+        for eid in eligible_ids:
+            d0 = d0_data[eid]
+            d90 = d90_data[eid]
 
-            # Weight Loss %: ((Day0Weight - Day90Weight) / Day0Weight) * 100
+            # Weight Loss % = ((Day0Weight - Day90Weight) / Day0Weight) * 100
             weight_loss_pct = ((d0["weight"] - d90["weight"]) / d0["weight"]) * 100.0
 
-            # WHR Improvement %: ((Day0WHR - Day90WHR) / Day0WHR) * 100 (if WHR exists for both)
+            # WHR Improvement % = ((Day0WHR - Day90WHR) / Day0WHR) * 100
             whr_imp_pct = 0.0
             if d0["whr"] is not None and d90["whr"] is not None:
                 whr_imp_pct = ((d0["whr"] - d90["whr"]) / d0["whr"]) * 100.0
@@ -293,9 +332,8 @@ class WinnerService:
             if whr_imp_pct > max_whr_imp_pct:
                 max_whr_imp_pct = whr_imp_pct
 
-            # Warn if missing in Day 45
             if eid not in day45_ids:
-                warnings.append(f"Participant '{d0['name']}' ({eid}) is missing in Day 45 (included in rankings).")
+                warnings.append(f"Participant '{d0['name']}' ({eid}) is missing in Day 45 (included in final rankings).")
 
             raw_results.append({
                 "employee_id": eid,
@@ -308,7 +346,6 @@ class WinnerService:
                 "whr_improvement_percent": whr_imp_pct
             })
 
-        # Step 5 & 6: Normalize and compute final score
         norm_weight_denom = max_weight_loss_pct if max_weight_loss_pct > 0 else 1.0
         norm_whr_denom = max_whr_imp_pct if max_whr_imp_pct > 0 else 1.0
 
@@ -316,27 +353,29 @@ class WinnerService:
             r["normalized_weight"] = max(0.0, (r["weight_loss_percent"] / norm_weight_denom) * 100.0) if max_weight_loss_pct > 0 else 0.0
             r["normalized_whr"] = max(0.0, (r["whr_improvement_percent"] / norm_whr_denom) * 100.0) if max_whr_imp_pct > 0 else 0.0
             
-            # If WHR exists, 50% Weight Loss + 50% WHR. Otherwise 100% Weight Loss score.
             if has_whr_data:
                 r["final_score"] = (r["normalized_weight"] * 0.5) + (r["normalized_whr"] * 0.5)
             else:
                 r["final_score"] = r["normalized_weight"]
 
-        # Sort descending by Final Score, using weight loss and WHR as secondary tie-breakers
         sorted_results = sorted(
             raw_results, 
             key=lambda x: (x["final_score"], x["weight_loss_percent"], x["whr_improvement_percent"]), 
             reverse=True
         )
 
-        # Assign ranks
         for idx, r in enumerate(sorted_results, 1):
             r["rank"] = idx
 
         winner = sorted_results[0] if sorted_results else None
 
+        total_d0 = d0_res.get("total_rows", len(day0_ids)) if isinstance(d0_res, dict) else len(day0_ids)
+        total_d90 = d90_res.get("total_rows", len(day90_ids)) if isinstance(d90_res, dict) else len(day90_ids)
+
         summary = {
-            "total_participants": len(sorted_results),
+            "total_processed_rows": total_d0 + total_d90,
+            "eligible_count": len(sorted_results),
+            "incomplete_count": len(incomplete_records),
             "highest_weight_loss": round(max_weight_loss_pct, 2),
             "highest_whr_improvement": round(max_whr_imp_pct, 2) if has_whr_data else 0.0,
             "winner_name": winner["name"] if winner else "N/A",
@@ -344,7 +383,6 @@ class WinnerService:
             "winner_final_score": round(winner["final_score"], 2) if winner else 0.0
         }
 
-        # Format numeric floats for display
         for r in sorted_results:
             r["day0_weight"] = round(r["day0_weight"], 2)
             r["day90_weight"] = round(r["day90_weight"], 2)
@@ -356,7 +394,7 @@ class WinnerService:
             r["normalized_whr"] = round(r["normalized_whr"], 2)
             r["final_score"] = round(r["final_score"], 2)
 
-        return summary, sorted_results, warnings
+        return summary, sorted_results, incomplete_records, warnings
 
     @classmethod
     def generate_excel_bytes(cls, rankings: list[dict], title: str) -> bytes:
