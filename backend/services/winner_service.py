@@ -65,9 +65,11 @@ class WinnerService:
     def parse_and_validate_sheet(cls, file_data: bytes, sheet_label: str) -> tuple[dict, list[str]]:
         """
         Parses an Excel sheet from bytes.
+        Validates only required calculation fields: Participant Identifier, Weight, Waist circumference, Hip circumference.
+        Ignores completely blank rows and optional measurement fields (Email, BMI, BMR, Pressure, etc.).
         Returns:
             data: dict of {employee_id: {name, weight, waist, hip, whr}}
-            errors: list of string validation errors/warnings
+            errors: list of participant-specific validation error strings
         """
         errors = []
         data = {}
@@ -147,7 +149,7 @@ class WinnerService:
                 break
 
         if not header_row_idx:
-            errors.append(f"[{sheet_label}] Could not find required table columns ('Name' and 'Weight') in top rows.")
+            errors.append(f"[{sheet_label}] Could not find required table columns ('Name' and 'Weight') in sheet headers.")
             return {}, errors
 
         processed_ids = set()
@@ -156,29 +158,30 @@ class WinnerService:
         for row_idx in range(header_row_idx + 1, ws.max_row + 1):
             row_cells = [ws.cell(row=row_idx, column=col_idx + 1).value for col_idx in range(ws.max_column)]
             
-            # Skip empty rows
+            # 1. Ignore completely blank rows (all cells empty or whitespace)
             if all(val is None or str(val).strip() == "" for val in row_cells):
                 continue
 
-            raw_id = row_cells[header_indices["employee_id"]]
-            raw_name = row_cells[header_indices["name"]]
-            raw_weight = row_cells[header_indices["weight"]]
+            raw_id = row_cells[header_indices["employee_id"]] if header_indices["employee_id"] < len(row_cells) else None
+            raw_name = row_cells[header_indices["name"]] if header_indices["name"] < len(row_cells) else None
+            raw_weight = row_cells[header_indices["weight"]] if header_indices["weight"] < len(row_cells) else None
 
             emp_id = cls.clean_employee_id(raw_id)
+            name = cls.clean_name(raw_name)
+            display_label = f"Participant: {name}" if name else f"ID: {emp_id}" if emp_id else f"Row {row_idx}"
+
+            row_has_error = False
+
             if not emp_id:
                 errors.append(f"[{sheet_label}] Row {row_idx}: Participant identifier is missing")
-                continue
+                row_has_error = True
+            elif emp_id in processed_ids:
+                errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Duplicate Participant Identifier '{emp_id}'")
+                row_has_error = True
+            else:
+                processed_ids.add(emp_id)
 
-            if emp_id in processed_ids:
-                errors.append(f"[{sheet_label}] Row {row_idx}: Duplicate Participant Identifier '{emp_id}'")
-                continue
-            processed_ids.add(emp_id)
-
-            name = cls.clean_name(raw_name)
-            if not name:
-                errors.append(f"[{sheet_label}] Row {row_idx} ({emp_id}): Name is missing")
-
-            # Weight validation
+            # Validate Weight (required)
             weight = None
             if raw_weight is not None and str(raw_weight).strip() != "":
                 try:
@@ -187,29 +190,49 @@ class WinnerService:
                         weight = f_val
                 except ValueError:
                     pass
+
             if weight is None:
-                errors.append(f"[{sheet_label}] Row {row_idx} ({emp_id}): Weight has invalid non-numeric value '{raw_weight}'")
+                errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Weight is missing or invalid")
+                row_has_error = True
+
+            # Validate Waist Circumference (required if column exists in sheet)
+            waist = None
+            if "waist" in header_indices:
+                raw_waist = row_cells[header_indices["waist"]] if header_indices["waist"] < len(row_cells) else None
+                if raw_waist is not None and str(raw_waist).strip() != "":
+                    try:
+                        w_val = float(str(raw_waist).strip())
+                        if w_val > 0:
+                            waist = w_val
+                    except ValueError:
+                        pass
+                if waist is None:
+                    errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Waist circumference is missing or invalid")
+                    row_has_error = True
+
+            # Validate Hip Circumference (required if column exists in sheet)
+            hip = None
+            if "hip" in header_indices:
+                raw_hip = row_cells[header_indices["hip"]] if header_indices["hip"] < len(row_cells) else None
+                if raw_hip is not None and str(raw_hip).strip() != "":
+                    try:
+                        h_val = float(str(raw_hip).strip())
+                        if h_val > 0:
+                            hip = h_val
+                    except ValueError:
+                        pass
+                if hip is None:
+                    errors.append(f"[{sheet_label}] Row {row_idx} ({display_label}): Hip circumference is missing or invalid")
+                    row_has_error = True
+
+            # If required fields have errors for this row, do not include row in results data
+            if row_has_error:
                 continue
 
-            # Optional Waist & Hip
-            waist = None
-            hip = None
-            whr = None
-            if "waist" in header_indices and "hip" in header_indices:
-                raw_waist = row_cells[header_indices["waist"]]
-                raw_hip = row_cells[header_indices["hip"]]
-                try:
-                    w_val = float(str(raw_waist).strip())
-                    h_val = float(str(raw_hip).strip())
-                    if w_val > 0 and h_val > 0:
-                        waist = w_val
-                        hip = h_val
-                        whr = waist / hip
-                except (ValueError, TypeError, ZeroDivisionError):
-                    pass
+            whr = (waist / hip) if (waist and hip) else None
 
             data[emp_id] = {
-                "name": name,
+                "name": name or emp_id,
                 "weight": weight,
                 "waist": waist,
                 "hip": hip,

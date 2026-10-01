@@ -9,7 +9,9 @@ API.interceptors.response.use(
   (res) => res,
   (err) => {
     const msg = err?.response?.data?.message || err.message || "Unknown error"
-    return Promise.reject(new Error(msg))
+    const error = new Error(msg)
+    error.response = err.response
+    return Promise.reject(error)
   }
 )
 
