@@ -1,4 +1,5 @@
 import os
+import re
 import openpyxl
 from io import BytesIO
 
@@ -15,6 +16,10 @@ class WinnerService:
             "emp_id", "emp code", "empcode", "employee code", "emp no", "empno", 
             "participant id", "user id", "sl. no.", "sl no", "sr no", "sr. no."
         ],
+        "identifier_fallback": [
+            "email-id", "email id", "email_id", "email", "phone no", "phone_no", 
+            "phone", "mobile", "phone number", "mobile no", "mobile number"
+        ],
         "name": [
             "name", "participant name", "employee name", "fullname", "full name", 
             "participant", "employee", "member name"
@@ -25,11 +30,11 @@ class WinnerService:
         ],
         "waist": [
             "waist", "waist (in)", "waist (cm)", "waist(in)", "waist(cm)", 
-            "waist size", "waist (inches)", "waist(inches)", "waist in inches", "initial waist", "final waist"
+            "waist size", "waist (inches)", "waist(inches)", "waist in inches", "initial waist", "final waist", "waist circumference"
         ],
         "hip": [
             "hip", "hip (in)", "hip (cm)", "hip(in)", "hip(cm)", 
-            "hip size", "hip (inches)", "hip(inches)", "hip in inches", "hips", "initial hip", "final hip"
+            "hip size", "hip (inches)", "hip(inches)", "hip in inches", "hips", "initial hip", "final hip", "hip circumference"
         ]
     }
 
@@ -39,11 +44,22 @@ class WinnerService:
             return ""
         val_str = str(val).strip()
         # Remove trailing .0 or .00 from floating numbers if read as such
-        import re
         if re.match(r"^\d+\.0+$", val_str):
             val_str = val_str.split(".")[0]
-        # Uppercase to ensure case-insensitive matching across files (e.g. emp01 vs EMP01)
+        # Uppercase to ensure case-insensitive matching across files
         return val_str.upper()
+
+    @staticmethod
+    def clean_name(name_val) -> str:
+        if name_val is None:
+            return ""
+        name = str(name_val).strip()
+        # Clean trailing merged gender strings if present (e.g. "PavithraFemale" -> "Pavithra")
+        if name.lower().endswith("female") and len(name) > 6 and name[-7] != " ":
+            name = name[:-6].strip()
+        elif name.lower().endswith("male") and len(name) > 4 and name[-5] != " ":
+            name = name[:-4].strip()
+        return name
 
     @classmethod
     def parse_and_validate_sheet(cls, file_data: bytes, sheet_label: str) -> tuple[dict, list[str]]:
@@ -73,29 +89,65 @@ class WinnerService:
         for r_idx in range(1, max_scan_row + 1):
             row_vals = [ws.cell(row=r_idx, column=c_idx).value for c_idx in range(1, ws.max_column + 1)]
             temp_indices = {}
-            for col_name, candidates in cls.HEADER_CANDIDATES.items():
+
+            # 1. Resolve Name
+            for c_idx, cell_val in enumerate(row_vals):
+                if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["name"]:
+                    temp_indices["name"] = c_idx
+                    break
+
+            # 2. Resolve Weight
+            for c_idx, cell_val in enumerate(row_vals):
+                if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["weight"]:
+                    temp_indices["weight"] = c_idx
+                    break
+
+            # 3. Resolve Employee ID or Fallback Identifier (Email/Phone/Name)
+            for c_idx, cell_val in enumerate(row_vals):
+                if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["employee_id"]:
+                    temp_indices["employee_id"] = c_idx
+                    break
+            if "employee_id" not in temp_indices:
                 for c_idx, cell_val in enumerate(row_vals):
-                    if cell_val is not None:
-                        normalized_cell = str(cell_val).strip().lower()
-                        if normalized_cell in candidates:
-                            temp_indices[col_name] = c_idx
-                            break
-            # Check if all required 5 columns were resolved in this row
-            if len(temp_indices) == len(cls.HEADER_CANDIDATES):
+                    if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["identifier_fallback"]:
+                        temp_indices["employee_id"] = c_idx
+                        break
+            if "employee_id" not in temp_indices and "name" in temp_indices:
+                temp_indices["employee_id"] = temp_indices["name"]
+
+            # 4. Resolve Waist & Hip (or Circumference fallback)
+            for c_idx, cell_val in enumerate(row_vals):
+                if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["waist"]:
+                    temp_indices["waist"] = c_idx
+                    break
+
+            for c_idx, cell_val in enumerate(row_vals):
+                if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["hip"]:
+                    temp_indices["hip"] = c_idx
+                    break
+
+            # If Waist/Hip not found by name, check for columns containing "circumfer" or "circ"
+            if "waist" not in temp_indices or "hip" not in temp_indices:
+                circ_cols = []
+                for c_idx, cell_val in enumerate(row_vals):
+                    if cell_val is not None and ("circumfer" in str(cell_val).strip().lower() or "circ" in str(cell_val).strip().lower()):
+                        circ_cols.append(c_idx)
+                if len(circ_cols) >= 2:
+                    if "waist" not in temp_indices:
+                        temp_indices["waist"] = circ_cols[0]
+                    if "hip" not in temp_indices:
+                        temp_indices["hip"] = circ_cols[1]
+                elif len(circ_cols) == 1 and "waist" not in temp_indices:
+                    temp_indices["waist"] = circ_cols[0]
+
+            # We MUST have at least 'name' and 'weight' and 'employee_id'
+            if "name" in temp_indices and "weight" in temp_indices and "employee_id" in temp_indices:
                 header_row_idx = r_idx
                 header_indices = temp_indices
                 break
 
         if not header_row_idx:
-            # Generate detailed error messages for missing columns
-            # Check row 1 or overall missing candidates for diagnostics
-            first_row_vals = [str(ws.cell(row=1, column=c_idx).value or "").strip().lower() for c_idx in range(1, ws.max_column + 1)]
-            for col_name, candidates in cls.HEADER_CANDIDATES.items():
-                found = any(v in candidates for v in first_row_vals)
-                if not found:
-                    errors.append(f"[{sheet_label}] Missing required column for '{col_name.replace('_', ' ').title()}'")
-            if not errors:
-                errors.append(f"[{sheet_label}] Could not find complete header row in top rows of sheet.")
+            errors.append(f"[{sheet_label}] Could not find required table columns ('Name' and 'Weight') in top rows.")
             return {}, errors
 
         processed_ids = set()
@@ -104,59 +156,57 @@ class WinnerService:
         for row_idx in range(header_row_idx + 1, ws.max_row + 1):
             row_cells = [ws.cell(row=row_idx, column=col_idx + 1).value for col_idx in range(ws.max_column)]
             
-            # Check if row is completely empty
+            # Skip empty rows
             if all(val is None or str(val).strip() == "" for val in row_cells):
                 continue
 
-            # Read raw values using header column indices
             raw_id = row_cells[header_indices["employee_id"]]
             raw_name = row_cells[header_indices["name"]]
             raw_weight = row_cells[header_indices["weight"]]
-            raw_waist = row_cells[header_indices["waist"]]
-            raw_hip = row_cells[header_indices["hip"]]
 
             emp_id = cls.clean_employee_id(raw_id)
             if not emp_id:
-                errors.append(f"[{sheet_label}] Row {row_idx}: Employee ID is missing")
+                errors.append(f"[{sheet_label}] Row {row_idx}: Participant identifier is missing")
                 continue
 
             if emp_id in processed_ids:
-                errors.append(f"[{sheet_label}] Row {row_idx}: Duplicate Employee ID '{emp_id}'")
+                errors.append(f"[{sheet_label}] Row {row_idx}: Duplicate Participant Identifier '{emp_id}'")
                 continue
             processed_ids.add(emp_id)
 
-            # Name validation
-            name = str(raw_name).strip() if raw_name is not None else ""
+            name = cls.clean_name(raw_name)
             if not name:
-                errors.append(f"[{sheet_label}] Row {row_idx} (Employee ID: {emp_id}): Name is missing")
+                errors.append(f"[{sheet_label}] Row {row_idx} ({emp_id}): Name is missing")
 
-            # Numeric fields validation
-            numeric_vals = {}
-            for field, val in [("weight", raw_weight), ("waist", raw_waist), ("hip", raw_hip)]:
-                if val is None or str(val).strip() == "":
-                    errors.append(f"[{sheet_label}] Row {row_idx} (Employee ID: {emp_id}): {field.title()} is missing")
-                    numeric_vals[field] = None
-                else:
-                    try:
-                        f_val = float(str(val).strip())
-                        if f_val <= 0:
-                            errors.append(f"[{sheet_label}] Row {row_idx} (Employee ID: {emp_id}): {field.title()} must be greater than zero")
-                            numeric_vals[field] = None
-                        else:
-                            numeric_vals[field] = f_val
-                    except ValueError:
-                        errors.append(f"[{sheet_label}] Row {row_idx} (Employee ID: {emp_id}): {field.title()} has invalid non-numeric value '{val}'")
-                        numeric_vals[field] = None
-
-            # Skip row if any of the numeric fields are invalid/missing
-            if any(v is None for v in numeric_vals.values()):
+            # Weight validation
+            weight = None
+            if raw_weight is not None and str(raw_weight).strip() != "":
+                try:
+                    f_val = float(str(raw_weight).strip())
+                    if f_val > 0:
+                        weight = f_val
+                except ValueError:
+                    pass
+            if weight is None:
+                errors.append(f"[{sheet_label}] Row {row_idx} ({emp_id}): Weight has invalid non-numeric value '{raw_weight}'")
                 continue
 
-            weight = numeric_vals["weight"]
-            waist = numeric_vals["waist"]
-            hip = numeric_vals["hip"]
-            
-            whr = waist / hip
+            # Optional Waist & Hip
+            waist = None
+            hip = None
+            whr = None
+            if "waist" in header_indices and "hip" in header_indices:
+                raw_waist = row_cells[header_indices["waist"]]
+                raw_hip = row_cells[header_indices["hip"]]
+                try:
+                    w_val = float(str(raw_waist).strip())
+                    h_val = float(str(raw_hip).strip())
+                    if w_val > 0 and h_val > 0:
+                        waist = w_val
+                        hip = h_val
+                        whr = waist / hip
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
 
             data[emp_id] = {
                 "name": name,
@@ -175,7 +225,7 @@ class WinnerService:
         Returns:
             summary: dict containing stats & winner info
             rankings: list of dict rankings
-            warnings: list of warning messages (e.g. missing participants in sheet(s))
+            warnings: list of warning messages
         """
         warnings = []
         
@@ -200,6 +250,7 @@ class WinnerService:
         raw_results = []
         max_weight_loss_pct = 0.0
         max_whr_imp_pct = 0.0
+        has_whr_data = False
 
         for eid in common_ids:
             d0 = day0_data[eid]
@@ -208,10 +259,12 @@ class WinnerService:
             # Weight Loss %: ((Day0Weight - Day90Weight) / Day0Weight) * 100
             weight_loss_pct = ((d0["weight"] - d90["weight"]) / d0["weight"]) * 100.0
 
-            # WHR Improvement %: ((Day0WHR - Day90WHR) / Day0WHR) * 100
-            whr_imp_pct = ((d0["whr"] - d90["whr"]) / d0["whr"]) * 100.0
+            # WHR Improvement %: ((Day0WHR - Day90WHR) / Day0WHR) * 100 (if WHR exists for both)
+            whr_imp_pct = 0.0
+            if d0["whr"] is not None and d90["whr"] is not None:
+                whr_imp_pct = ((d0["whr"] - d90["whr"]) / d0["whr"]) * 100.0
+                has_whr_data = True
 
-            # Track highest values for normalization (denominators must be positive)
             if weight_loss_pct > max_weight_loss_pct:
                 max_weight_loss_pct = weight_loss_pct
             if whr_imp_pct > max_whr_imp_pct:
@@ -219,7 +272,7 @@ class WinnerService:
 
             # Warn if missing in Day 45
             if eid not in day45_ids:
-                warnings.append(f"Participant '{d0['name']}' ({eid}) is missing in Day 45 (included in rankings, but graphs may be incomplete).")
+                warnings.append(f"Participant '{d0['name']}' ({eid}) is missing in Day 45 (included in rankings).")
 
             raw_results.append({
                 "employee_id": eid,
@@ -237,12 +290,14 @@ class WinnerService:
         norm_whr_denom = max_whr_imp_pct if max_whr_imp_pct > 0 else 1.0
 
         for r in raw_results:
-            # Scale each between 0–100, clamping lower bound to 0 (in case of weight gain / WHR degradation)
             r["normalized_weight"] = max(0.0, (r["weight_loss_percent"] / norm_weight_denom) * 100.0) if max_weight_loss_pct > 0 else 0.0
             r["normalized_whr"] = max(0.0, (r["whr_improvement_percent"] / norm_whr_denom) * 100.0) if max_whr_imp_pct > 0 else 0.0
             
-            # Final Score = (NormalizedWeight * 0.5) + (NormalizedWHR * 0.5)
-            r["final_score"] = (r["normalized_weight"] * 0.5) + (r["normalized_whr"] * 0.5)
+            # If WHR exists, 50% Weight Loss + 50% WHR. Otherwise 100% Weight Loss score.
+            if has_whr_data:
+                r["final_score"] = (r["normalized_weight"] * 0.5) + (r["normalized_whr"] * 0.5)
+            else:
+                r["final_score"] = r["normalized_weight"]
 
         # Sort descending by Final Score, using weight loss and WHR as secondary tie-breakers
         sorted_results = sorted(
@@ -255,13 +310,12 @@ class WinnerService:
         for idx, r in enumerate(sorted_results, 1):
             r["rank"] = idx
 
-        # Winner Details
         winner = sorted_results[0] if sorted_results else None
 
         summary = {
             "total_participants": len(sorted_results),
             "highest_weight_loss": round(max_weight_loss_pct, 2),
-            "highest_whr_improvement": round(max_whr_imp_pct, 2),
+            "highest_whr_improvement": round(max_whr_imp_pct, 2) if has_whr_data else 0.0,
             "winner_name": winner["name"] if winner else "N/A",
             "winner_employee_id": winner["employee_id"] if winner else "N/A",
             "winner_final_score": round(winner["final_score"], 2) if winner else 0.0
@@ -272,8 +326,8 @@ class WinnerService:
             r["day0_weight"] = round(r["day0_weight"], 2)
             r["day90_weight"] = round(r["day90_weight"], 2)
             r["weight_loss_percent"] = round(r["weight_loss_percent"], 2)
-            r["day0_whr"] = round(r["day0_whr"], 4)
-            r["day90_whr"] = round(r["day90_whr"], 4)
+            r["day0_whr"] = round(r["day0_whr"], 4) if r["day0_whr"] is not None else "-"
+            r["day90_whr"] = round(r["day90_whr"], 4) if r["day90_whr"] is not None else "-"
             r["whr_improvement_percent"] = round(r["whr_improvement_percent"], 2)
             r["normalized_weight"] = round(r["normalized_weight"], 2)
             r["normalized_whr"] = round(r["normalized_whr"], 2)
@@ -304,7 +358,7 @@ class WinnerService:
         )
 
         headers = [
-            "Rank", "Employee ID", "Name", 
+            "Rank", "Identifier", "Name", 
             "Day 0 Weight", "Day 90 Weight", "Weight Loss %", 
             "Day 0 WHR", "Day 90 WHR", "WHR Improvement %", 
             "Final Score"
@@ -329,11 +383,9 @@ class WinnerService:
             ws.cell(row=row_idx, column=9, value=r["whr_improvement_percent"]).alignment = right_align
             ws.cell(row=row_idx, column=10, value=r["final_score"]).alignment = right_align
 
-            # Add thin border to all cells in the row
             for col_idx in range(1, 11):
                 ws.cell(row=row_idx, column=col_idx).border = thin_border
 
-        # Set heights and auto widths
         ws.row_dimensions[1].height = 25
         for row in range(2, len(rankings) + 2):
             ws.row_dimensions[row].height = 20
