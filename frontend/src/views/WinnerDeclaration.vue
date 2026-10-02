@@ -70,9 +70,7 @@ const handleFileUpload = async (event, day) => {
   }
 
   try {
-    const res = await API.post("/api/winner/upload", formData, {
-      headers: { "Content-Type": "multipart/form-data" }
-    })
+    const res = await API.post("/api/winner/upload", formData)
     
     if (res.data.success) {
       if (res.data.session_id) {
@@ -98,7 +96,7 @@ const handleFileUpload = async (event, day) => {
       })
     }
   } catch (err) {
-    const backendErrors = err.response?.data?.errors || [err.message]
+    const backendErrors = err.response?.data?.errors || [err.response?.data?.message || err.message]
     uploads.value[day].errors = backendErrors
     uploads.value[day].name = ""
     uploads.value[day].file = null
@@ -126,24 +124,24 @@ const calculateWinner = async () => {
   incompleteRecords.value = []
 
   try {
-    const formData = new FormData()
-    if (sessionId.value) {
-      formData.append("session_id", sessionId.value)
-    }
+    let res
+    const hasAllRealFiles = 
+      uploads.value.day0.file instanceof File &&
+      uploads.value.day45.file instanceof File &&
+      uploads.value.day90.file instanceof File
 
-    if (uploads.value.day0.file instanceof File) {
+    if (hasAllRealFiles) {
+      const formData = new FormData()
+      if (sessionId.value) formData.append("session_id", sessionId.value)
       formData.append("day0", uploads.value.day0.file)
-    }
-    if (uploads.value.day45.file instanceof File) {
       formData.append("day45", uploads.value.day45.file)
-    }
-    if (uploads.value.day90.file instanceof File) {
       formData.append("day90", uploads.value.day90.file)
+      res = await API.post("/api/winner/calculate", formData)
+    } else {
+      res = await API.post("/api/winner/calculate", {
+        session_id: sessionId.value
+      })
     }
-
-    const res = await API.post("/api/winner/calculate", formData, {
-      headers: { "Content-Type": "multipart/form-data" }
-    })
 
     if (res.data.success) {
       if (res.data.session_id) {
@@ -163,7 +161,7 @@ const calculateWinner = async () => {
       })
     }
   } catch (err) {
-    const msg = err.response?.data?.message || err.message || ""
+    const msg = err.response?.data?.message || err.message || "Calculation failed"
     const backendErrors = err.response?.data?.errors || [msg]
     calculationErrors.value = backendErrors
 
@@ -299,17 +297,9 @@ const triggerPrint = () => {
 }
 
 onMounted(() => {
-  // If we already have a session ID, check if files can be loaded/calculated or keep states
-  // Since files are on backend, we could verify or calculate again
-  if (sessionId.value) {
-    // We mock files presence on mounted so calculate is enabled
-    // This allows recalculating in case page refreshes
-    uploads.value.day0.file = { name: "Saved on server" }
-    uploads.value.day45.file = { name: "Saved on server" }
-    uploads.value.day90.file = { name: "Saved on server" }
-    uploads.value.day0.name = "Baseline measurements spreadsheet"
-    uploads.value.day45.name = "Mid-challenge measurements spreadsheet"
-    uploads.value.day90.name = "Final measurements spreadsheet"
+  // Clear any unverified local session state on mount so uploads are clean
+  if (sessionId.value && !uploads.value.day0.file) {
+    // If no active File objects in memory, let user upload fresh or calculate cleanly
   }
 })
 </script>
