@@ -74,17 +74,26 @@ def upload_file():
 
 @bp.route("/calculate", methods=["POST"])
 def calculate_leaderboard():
-    data = request.get_json() or {}
-    session_id = data.get("session_id")
+    if request.is_json:
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+    else:
+        session_id = request.form.get("session_id")
 
     if not session_id:
-        return jsonify({"success": False, "message": "Missing required parameter 'session_id'"}), 400
+        session_id = uuid.uuid4().hex
 
     upload_root = current_app.config["UPLOAD_FOLDER"]
     session_dir = os.path.join(upload_root, "winner_declaration", session_id)
+    os.makedirs(session_dir, exist_ok=True)
 
-    if not os.path.isdir(session_dir):
-        return jsonify({"success": False, "message": "Invalid or expired session. Please upload the Excel files again."}), 404
+    # Save any files passed directly in the request (e.g. day0, day45, day90)
+    for day_key in ["day0", "day45", "day90"]:
+        if day_key in request.files:
+            uploaded_f = request.files[day_key]
+            if uploaded_f and uploaded_f.filename != "":
+                dest_path = os.path.join(session_dir, f"{day_key}.xlsx")
+                uploaded_f.save(dest_path)
 
     # Verify that all three files are present
     required_files = {"day0.xlsx": "Day 0", "day45.xlsx": "Day 45", "day90.xlsx": "Day 90"}
@@ -96,6 +105,7 @@ def calculate_leaderboard():
     if missing:
         return jsonify({
             "success": False,
+            "session_id": session_id,
             "message": f"Missing files for: {', '.join(missing)}. Please upload all three Excel sheets."
         }), 400
 
@@ -124,6 +134,7 @@ def calculate_leaderboard():
 
         return jsonify({
             "success": True,
+            "session_id": session_id,
             "summary": summary,
             "rankings": rankings,
             "incomplete_records": incomplete_records,

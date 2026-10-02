@@ -75,7 +75,7 @@ const handleFileUpload = async (event, day) => {
     })
     
     if (res.data.success) {
-      if (!sessionId.value) {
+      if (res.data.session_id) {
         sessionId.value = res.data.session_id
         localStorage.setItem("winnerSessionId", res.data.session_id)
       }
@@ -126,11 +126,30 @@ const calculateWinner = async () => {
   incompleteRecords.value = []
 
   try {
-    const res = await API.post("/api/winner/calculate", {
-      session_id: sessionId.value
+    const formData = new FormData()
+    if (sessionId.value) {
+      formData.append("session_id", sessionId.value)
+    }
+
+    if (uploads.value.day0.file instanceof File) {
+      formData.append("day0", uploads.value.day0.file)
+    }
+    if (uploads.value.day45.file instanceof File) {
+      formData.append("day45", uploads.value.day45.file)
+    }
+    if (uploads.value.day90.file instanceof File) {
+      formData.append("day90", uploads.value.day90.file)
+    }
+
+    const res = await API.post("/api/winner/calculate", formData, {
+      headers: { "Content-Type": "multipart/form-data" }
     })
 
     if (res.data.success) {
+      if (res.data.session_id) {
+        sessionId.value = res.data.session_id
+        localStorage.setItem("winnerSessionId", res.data.session_id)
+      }
       summary.value = res.data.summary
       rankings.value = res.data.rankings
       incompleteRecords.value = res.data.incomplete_records || []
@@ -144,24 +163,25 @@ const calculateWinner = async () => {
       })
     }
   } catch (err) {
-    const backendErrors = err.response?.data?.errors || [err.message]
+    const msg = err.response?.data?.message || err.message || ""
+    const backendErrors = err.response?.data?.errors || [msg]
     calculationErrors.value = backendErrors
 
-    // If session expired or missing on backend, clear local session state so user can re-upload easily
-    if (err.response?.status === 404 || err.response?.data?.message?.includes("session")) {
+    // If session expired or missing files on backend, clear local session state so user can re-upload easily
+    if (err.response?.status === 404 || msg.includes("session") || msg.includes("Missing files")) {
       sessionId.value = ""
       localStorage.removeItem("winnerSessionId")
       uploads.value = {
-        day0: { file: null, name: "", loading: false, errors: [] },
-        day45: { file: null, name: "", loading: false, errors: [] },
-        day90: { file: null, name: "", loading: false, errors: [] },
+        day0: { file: null, name: "", loading: false, errors: [], total_rows: 0, valid_count: 0, incomplete_count: 0, incomplete_participants: [] },
+        day45: { file: null, name: "", loading: false, errors: [], total_rows: 0, valid_count: 0, incomplete_count: 0, incomplete_participants: [] },
+        day90: { file: null, name: "", loading: false, errors: [], total_rows: 0, valid_count: 0, incomplete_count: 0, incomplete_participants: [] },
       }
     }
 
     Swal.fire({
       icon: "error",
       title: "Calculation Failed",
-      text: err.response?.data?.message || err.message
+      text: msg
     })
   } finally {
     isCalculating.value = false
