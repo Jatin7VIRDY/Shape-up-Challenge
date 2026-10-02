@@ -285,11 +285,11 @@ class WinnerService:
         for eid in sorted(only_in_d0):
             incomplete_records.append({
                 "row": "-",
-                "participant": d0_data[eid]["name"],
+                "participant": d0_data[eid].get("name", eid),
                 "stage": "Day 90",
                 "missing_data": "Final Measurements (Day 90)",
                 "status": "Incomplete",
-                "reason": f"Participant '{d0_data[eid]['name']}' ({eid}) has Day 0 measurements but is missing in Day 90 sheet."
+                "reason": f"Participant '{d0_data[eid].get('name', eid)}' ({eid}) has Day 0 measurements but is missing in Day 90 sheet."
             })
 
         # Participants in Day 90 but missing in Day 0
@@ -297,16 +297,14 @@ class WinnerService:
         for eid in sorted(only_in_d90):
             incomplete_records.append({
                 "row": "-",
-                "participant": d90_data[eid]["name"],
+                "participant": d90_data[eid].get("name", eid),
                 "stage": "Day 0",
                 "missing_data": "Baseline Measurements (Day 0)",
                 "status": "Incomplete",
-                "reason": f"Participant '{d90_data[eid]['name']}' ({eid}) has Day 90 measurements but is missing in Day 0 sheet."
+                "reason": f"Participant '{d90_data[eid].get('name', eid)}' ({eid}) has Day 90 measurements but is missing in Day 0 sheet."
             })
 
-        eligible_ids = day0_ids & day90_ids
-        if not eligible_ids:
-            raise ValueError("No participants have complete Day 0 and Day 90 measurements.")
+        common_ids = day0_ids & day90_ids
 
         warnings = []
         raw_results = []
@@ -314,37 +312,87 @@ class WinnerService:
         max_whr_imp_pct = 0.0
         has_whr_data = False
 
-        for eid in eligible_ids:
-            d0 = d0_data[eid]
-            d90 = d90_data[eid]
+        for eid in sorted(common_ids):
+            try:
+                d0 = d0_data[eid]
+                d90 = d90_data[eid]
 
-            # Weight Loss % = ((Day0Weight - Day90Weight) / Day0Weight) * 100
-            weight_loss_pct = ((d0["weight"] - d90["weight"]) / d0["weight"]) * 100.0
+                d0_wt = d0.get("weight")
+                d90_wt = d90.get("weight")
+                d0_waist = d0.get("waist")
+                d90_waist = d90.get("waist")
+                d0_hip = d0.get("hip")
+                d90_hip = d90.get("hip")
 
-            # WHR Improvement % = ((Day0WHR - Day90WHR) / Day0WHR) * 100
-            whr_imp_pct = 0.0
-            if d0["whr"] is not None and d90["whr"] is not None:
-                whr_imp_pct = ((d0["whr"] - d90["whr"]) / d0["whr"]) * 100.0
-                has_whr_data = True
+                d0_whr = d0.get("whr")
+                d90_whr = d90.get("whr")
 
-            if weight_loss_pct > max_weight_loss_pct:
-                max_weight_loss_pct = weight_loss_pct
-            if whr_imp_pct > max_whr_imp_pct:
-                max_whr_imp_pct = whr_imp_pct
+                # Compute WHR dynamically if waist & hip are valid numbers
+                if d0_whr is None and d0_waist and d0_hip and d0_hip > 0:
+                    d0_whr = d0_waist / d0_hip
+                if d90_whr is None and d90_waist and d90_hip and d90_hip > 0:
+                    d90_whr = d90_waist / d90_hip
 
-            if eid not in day45_ids:
-                warnings.append(f"Participant '{d0['name']}' ({eid}) is missing in Day 45 (included in final rankings).")
+                missing_items = []
+                if d0_wt is None or d0_wt <= 0: missing_items.append("Day 0 Weight")
+                if d90_wt is None or d90_wt <= 0: missing_items.append("Day 90 Weight")
+                if d0_waist is None or d0_waist <= 0: missing_items.append("Day 0 Waist")
+                if d90_waist is None or d90_waist <= 0: missing_items.append("Day 90 Waist")
+                if d0_hip is None or d0_hip <= 0: missing_items.append("Day 0 Hip")
+                if d90_hip is None or d90_hip <= 0: missing_items.append("Day 90 Hip")
 
-            raw_results.append({
-                "employee_id": eid,
-                "name": d0["name"],
-                "day0_weight": d0["weight"],
-                "day90_weight": d90["weight"],
-                "weight_loss_percent": weight_loss_pct,
-                "day0_whr": d0["whr"],
-                "day90_whr": d90["whr"],
-                "whr_improvement_percent": whr_imp_pct
-            })
+                if missing_items:
+                    incomplete_records.append({
+                        "row": "-",
+                        "participant": d0.get("name", eid),
+                        "stage": "Day 0 / Day 90",
+                        "missing_data": ", ".join(missing_items),
+                        "status": "Incomplete",
+                        "reason": f"Participant '{d0.get('name', eid)}' ({eid}) missing required measurements: {', '.join(missing_items)}"
+                    })
+                    continue
+
+                # Weight Loss % = ((Day0Weight - Day90Weight) / Day0Weight) * 100
+                weight_loss_pct = ((d0_wt - d90_wt) / d0_wt) * 100.0
+
+                # WHR Improvement % = ((Day0WHR - Day90WHR) / Day0WHR) * 100
+                whr_imp_pct = 0.0
+                if d0_whr is not None and d90_whr is not None and d0_whr > 0:
+                    whr_imp_pct = ((d0_whr - d90_whr) / d0_whr) * 100.0
+                    has_whr_data = True
+
+                if weight_loss_pct > max_weight_loss_pct:
+                    max_weight_loss_pct = weight_loss_pct
+                if whr_imp_pct > max_whr_imp_pct:
+                    max_whr_imp_pct = whr_imp_pct
+
+                if eid not in day45_ids:
+                    warnings.append(f"Participant '{d0.get('name', eid)}' ({eid}) is missing in Day 45 (included in final rankings).")
+
+                raw_results.append({
+                    "employee_id": eid,
+                    "name": d0.get("name", eid),
+                    "day0_weight": float(d0_wt),
+                    "day90_weight": float(d90_wt),
+                    "weight_loss_percent": float(weight_loss_pct),
+                    "day0_whr": float(d0_whr) if d0_whr is not None else None,
+                    "day90_whr": float(d90_whr) if d90_whr is not None else None,
+                    "whr_improvement_percent": float(whr_imp_pct)
+                })
+
+            except Exception as p_err:
+                incomplete_records.append({
+                    "row": "-",
+                    "participant": d0_data.get(eid, {}).get("name", eid),
+                    "stage": "Calculation Error",
+                    "missing_data": str(p_err),
+                    "status": "Incomplete",
+                    "reason": f"Calculation error for participant '{eid}': {str(p_err)}"
+                })
+                continue
+
+        if not raw_results:
+            raise ValueError("No eligible participants with complete Day 0 and Day 90 measurements found.")
 
         norm_weight_denom = max_weight_loss_pct if max_weight_loss_pct > 0 else 1.0
         norm_whr_denom = max_whr_imp_pct if max_whr_imp_pct > 0 else 1.0
@@ -374,6 +422,7 @@ class WinnerService:
 
         summary = {
             "total_processed_rows": total_d0 + total_d90,
+            "total_participants": len(sorted_results),
             "eligible_count": len(sorted_results),
             "incomplete_count": len(incomplete_records),
             "highest_weight_loss": round(max_weight_loss_pct, 2),
@@ -384,15 +433,15 @@ class WinnerService:
         }
 
         for r in sorted_results:
-            r["day0_weight"] = round(r["day0_weight"], 2)
-            r["day90_weight"] = round(r["day90_weight"], 2)
-            r["weight_loss_percent"] = round(r["weight_loss_percent"], 2)
+            r["day0_weight"] = round(r["day0_weight"], 2) if r["day0_weight"] is not None else 0.0
+            r["day90_weight"] = round(r["day90_weight"], 2) if r["day90_weight"] is not None else 0.0
+            r["weight_loss_percent"] = round(r["weight_loss_percent"], 2) if r["weight_loss_percent"] is not None else 0.0
             r["day0_whr"] = round(r["day0_whr"], 4) if r["day0_whr"] is not None else "-"
             r["day90_whr"] = round(r["day90_whr"], 4) if r["day90_whr"] is not None else "-"
-            r["whr_improvement_percent"] = round(r["whr_improvement_percent"], 2)
-            r["normalized_weight"] = round(r["normalized_weight"], 2)
-            r["normalized_whr"] = round(r["normalized_whr"], 2)
-            r["final_score"] = round(r["final_score"], 2)
+            r["whr_improvement_percent"] = round(r["whr_improvement_percent"], 2) if r["whr_improvement_percent"] is not None else 0.0
+            r["normalized_weight"] = round(r["normalized_weight"], 2) if r["normalized_weight"] is not None else 0.0
+            r["normalized_whr"] = round(r["normalized_whr"], 2) if r["normalized_whr"] is not None else 0.0
+            r["final_score"] = round(r["final_score"], 2) if r["final_score"] is not None else 0.0
 
         return summary, sorted_results, incomplete_records, warnings
 

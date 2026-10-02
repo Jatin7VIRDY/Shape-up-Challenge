@@ -221,6 +221,13 @@ def create_app(env: str = "default") -> Flask:
     cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
     limiter.init_app(app)
 
+    @app.after_request
+    def add_cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+        return response
+
     @app.errorhandler(429)
     def rate_limit_handler(e):
         return jsonify({"message": "Too many requests. Please try again later."}), 429
