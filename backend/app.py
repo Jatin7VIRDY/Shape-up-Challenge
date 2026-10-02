@@ -228,6 +228,21 @@ def create_app(env: str = "default") -> Flask:
         response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
         return response
 
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        import traceback
+        from werkzeug.exceptions import HTTPException
+        if isinstance(e, HTTPException):
+            response = jsonify({"success": False, "message": e.description})
+            response.status_code = e.code
+        else:
+            response = jsonify({"success": False, "message": f"Internal server error: {str(e)}", "detail": traceback.format_exc()})
+            response.status_code = 500
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+        return response
+
     @app.errorhandler(429)
     def rate_limit_handler(e):
         return jsonify({"message": "Too many requests. Please try again later."}), 429

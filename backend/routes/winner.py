@@ -170,12 +170,12 @@ def export_winner_rankings():
         with open(os.path.join(session_dir, "day90.xlsx"), "rb") as f:
             day90_bytes = f.read()
 
-        day0_data, _ = WinnerService.parse_and_validate_sheet(day0_bytes, "Day 0")
-        day45_data, _ = WinnerService.parse_and_validate_sheet(day45_bytes, "Day 45")
-        day90_data, _ = WinnerService.parse_and_validate_sheet(day90_bytes, "Day 90")
+        day0_res = WinnerService.parse_and_validate_sheet(day0_bytes, "Day 0")
+        day45_res = WinnerService.parse_and_validate_sheet(day45_bytes, "Day 45")
+        day90_res = WinnerService.parse_and_validate_sheet(day90_bytes, "Day 90")
 
         # Recalculate
-        _, rankings, _ = WinnerService.calculate_results(day0_data, day45_data, day90_data)
+        _, rankings, _, _ = WinnerService.calculate_results(day0_res, day45_res, day90_res)
 
         if export_type == "top10":
             rankings = rankings[:10]
