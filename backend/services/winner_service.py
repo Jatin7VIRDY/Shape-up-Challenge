@@ -25,11 +25,13 @@ class WinnerService:
         ],
         "waist": [
             "waist", "waist (in)", "waist (cm)", "waist(in)", "waist(cm)", 
-            "waist size", "waist (inches)", "waist(inches)", "waist in inches", "initial waist", "final waist", "waist circumference"
+            "waist size", "waist (inches)", "waist(inches)", "waist in inches", "initial waist", "final waist", 
+            "waist circumference", "waist circumferece"
         ],
         "hip": [
             "hip", "hip (in)", "hip (cm)", "hip(in)", "hip(cm)", 
-            "hip size", "hip (inches)", "hip(inches)", "hip in inches", "hips", "initial hip", "final hip", "hip circumference"
+            "hip size", "hip (inches)", "hip(inches)", "hip in inches", "hips", "initial hip", "final hip", 
+            "hip circumference", "hip circumferece"
         ]
     }
 
@@ -112,30 +114,49 @@ class WinnerService:
             if "employee_id" not in temp_indices and "name" in temp_indices:
                 temp_indices["employee_id"] = temp_indices["name"]
 
-            # 4. Resolve Waist & Hip (or Circumference fallback)
+            # 4. Resolve Waist & Hip safely using multi-step priority
+            # Step 1: Explicit candidate matching for waist
             for c_idx, cell_val in enumerate(row_vals):
                 if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["waist"]:
                     temp_indices["waist"] = c_idx
                     break
 
+            # Step 2: Explicit candidate matching for hip
             for c_idx, cell_val in enumerate(row_vals):
                 if cell_val is not None and str(cell_val).strip().lower() in cls.HEADER_CANDIDATES["hip"]:
                     temp_indices["hip"] = c_idx
                     break
 
-            # If Waist/Hip not found by name, check for columns containing "circumfer" or "circ"
-            if "waist" not in temp_indices or "hip" not in temp_indices:
-                circ_cols = []
+            # Step 3: Search for columns containing "waist" if waist is still missing
+            if "waist" not in temp_indices:
                 for c_idx, cell_val in enumerate(row_vals):
-                    if cell_val is not None and ("circumfer" in str(cell_val).strip().lower() or "circ" in str(cell_val).strip().lower()):
-                        circ_cols.append(c_idx)
-                if len(circ_cols) >= 2:
-                    if "waist" not in temp_indices:
-                        temp_indices["waist"] = circ_cols[0]
-                    if "hip" not in temp_indices:
-                        temp_indices["hip"] = circ_cols[1]
-                elif len(circ_cols) == 1 and "waist" not in temp_indices:
-                    temp_indices["waist"] = circ_cols[0]
+                    if cell_val is not None and "waist" in str(cell_val).strip().lower():
+                        temp_indices["waist"] = c_idx
+                        break
+
+            # Step 4: Search for columns containing "hip" if hip is still missing
+            if "hip" not in temp_indices:
+                for c_idx, cell_val in enumerate(row_vals):
+                    if cell_val is not None and "hip" in str(cell_val).strip().lower():
+                        if c_idx != temp_indices.get("waist"):
+                            temp_indices["hip"] = c_idx
+                            break
+
+            # Step 5: Generic circumference fallback only if field still missing
+            if "waist" not in temp_indices or "hip" not in temp_indices:
+                circ_cols = [
+                    c_idx for c_idx, cell_val in enumerate(row_vals)
+                    if cell_val is not None and ("circumfer" in str(cell_val).strip().lower() or "circ" in str(cell_val).strip().lower())
+                    and c_idx != temp_indices.get("waist") and c_idx != temp_indices.get("hip")
+                ]
+                if "waist" not in temp_indices and circ_cols:
+                    temp_indices["waist"] = circ_cols.pop(0)
+                if "hip" not in temp_indices and circ_cols:
+                    temp_indices["hip"] = circ_cols.pop(0)
+
+            # Step 6: Guarantee waist and hip never share the same column index
+            if "waist" in temp_indices and "hip" in temp_indices and temp_indices["waist"] == temp_indices["hip"]:
+                del temp_indices["hip"]
 
             # We MUST have at least 'name' and 'weight' and 'employee_id'
             if "name" in temp_indices and "weight" in temp_indices and "employee_id" in temp_indices:
